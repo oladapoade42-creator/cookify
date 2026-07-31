@@ -1,4 +1,3 @@
-import { Analytics } from '@vercel/analytics/next';
 import { supabase } from './supabase';
 import RecipeCard from "./components/RecipeCard";
 import XPCard from "./components/XPCard";
