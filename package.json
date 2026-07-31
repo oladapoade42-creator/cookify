@@ -30,5 +30,9 @@
     "globals": "^17.7.0",
     "tailwindcss": "^4.1.11",
     "vite": "^8.1.1"
+  },
+  "allowScripts": {
+    "@google/genai@2.13.0": true,
+    "protobufjs@7.6.5": true
   }
 }
