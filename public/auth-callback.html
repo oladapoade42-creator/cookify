@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Auth Callback</title>
+    <script>
+      // This page receives the OAuth redirect (hash or query) and posts it to the opener window.
+      (function () {
+        function parseHash(hash) {
+          const q = {};
+          if (!hash) return q;
+          const parts = hash.replace(/^#/, '').split('&');
+          parts.forEach(p => {
+            const [k,v] = p.split('=');
+            q[decodeURIComponent(k)] = decodeURIComponent(v || '');
+          });
+          return q;
+        }
+
+        function parseQuery(qs) {
+          const q = {};
+          if (!qs) return q;
+          const s = qs.replace(/^\?/, '').split('&');
+          s.forEach(p => {
+            const [k,v] = p.split('=');
+            q[decodeURIComponent(k)] = decodeURIComponent(v || '');
+          });
+          return q;
+        }
+
+        const payload = {
+          provider: null,
+          payload: {},
+        };
+
+        // Try parse hash (implicit token flows)
+        const hash = parseHash(window.location.hash);
+        const query = parseQuery(window.location.search);
+
+        // Heuristic: if access_token present, it's Google implicit flow
+        if (hash && hash.access_token) {
+          payload.provider = 'google';
+          payload.payload = hash;
+        } else if (query && query.code) {
+          // If we have a code in query, provider likely Apple (or server flow)
+          payload.provider = 'apple';
+          payload.payload = query;
+        } else if (query && query.id_token) {
+          payload.provider = 'apple';
+          payload.payload = query;
+        } else {
+          // fallback: include both
+          payload.provider = 'unknown';
+          payload.payload = Object.assign({}, hash, query);
+        }
+
+        // Post back to opener
+        if (window.opener && typeof window.opener.postMessage === 'function') {
+          window.opener.postMessage({ type: 'oauth_callback', provider: payload.provider, payload: payload.payload }, '*');
+        }
+
+        // Close window shortly after
+        setTimeout(() => window.close(), 600);
+      })();
+    </script>
+  </head>
+  <body>
+    <p>Completing sign in...</p>
+  </body>
+</html>
