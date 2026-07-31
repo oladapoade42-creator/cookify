@@ -55,11 +55,18 @@ export default function Profile({
     if (stored) setProfilePhoto(stored);
 
     const storedName = localStorage.getItem("cookify_username");
-    if (storedName) setUsername(storedName);
+    if (storedName) {
+      setUsername(storedName);
+    } else if (authUser?.email) {
+      // Default to the part of their Google email before @ — e.g.
+      // "ademola.cooks@gmail.com" -> "ademola.cooks" — still editable after.
+      const emailPrefix = authUser.email.split("@")[0];
+      setUsername(emailPrefix);
+    }
 
     const storedColor = localStorage.getItem("cookify_accent_color");
     if (storedColor) setAccentColor(storedColor);
-  }, []);
+  }, [authUser]);
 
   useEffect(() => {
     if (!authUser) return;

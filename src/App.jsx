@@ -27,6 +27,7 @@ import {
   LogOut,
   House,
   Heart,
+  X,
 } from 'lucide-react';
 
 export default function App() {
@@ -352,6 +353,7 @@ export default function App() {
 // --- AUTHENTICATION SCREEN ---
 function AuthScreen({ onLogin }) {
   const [isLoading, setIsLoading] = useState(false);
+  const [legalDoc, setLegalDoc] = useState(null); // 'terms' | 'privacy' | null
   const [activeProvider, setActiveProvider] = useState(null);
 
   const handleLogin = (provider = 'guest') => {
@@ -427,8 +429,38 @@ function AuthScreen({ onLogin }) {
 
       <p className="text-[10px] text-center text-gray-400 font-bold uppercase tracking-widest px-4">
         By continuing, you agree to Cookify's <br />
-        <span className="text-white underline">Terms of Service</span> & <span className="text-white underline">Privacy Policy</span>
+        <button type="button" onClick={() => setLegalDoc('terms')} className="text-white underline">Terms of Service</button> & <button type="button" onClick={() => setLegalDoc('privacy')} className="text-white underline">Privacy Policy</button>
       </p>
+
+      {legalDoc && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 p-4">
+          <div className="w-full max-w-[440px] max-h-[80vh] overflow-y-auto rounded-[28px] border border-white/15 bg-zinc-950 backdrop-blur-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-black">{legalDoc === 'terms' ? 'Terms of Service' : 'Privacy Policy'}</h3>
+              <button onClick={() => setLegalDoc(null)} className="rounded-full border border-white/15 bg-white/10 p-2"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="space-y-3 text-sm text-gray-300 leading-6">
+              {legalDoc === 'terms' ? (
+                <>
+                  <p>By using Cookify, you agree to use the app for its intended purpose — discovering, learning, and cooking recipes, and where applicable, buying and selling food through E-Restaurant.</p>
+                  <p>Cookify Pro and Cookify Pro+ are recurring monthly subscriptions billed through our payment processor. You can cancel anytime; access continues until the end of the current billing period.</p>
+                  <p>E-Restaurant sellers are independent users, not Cookify employees. Cookify does not process, verify, or guarantee payments made directly between buyers and sellers, and is not responsible for food quality, safety, or delivery.</p>
+                  <p>You're responsible for the accuracy of content you post, including food listings, comments, and profile information.</p>
+                  <p>We may suspend accounts that violate these terms, abuse the platform, or engage in fraudulent activity.</p>
+                </>
+              ) : (
+                <>
+                  <p>Cookify collects the information you provide directly: your email (via Google/Apple sign-in), profile details, recipes you interact with, comments, and E-Restaurant listings/orders.</p>
+                  <p>We use Supabase to store account and app data, and Google Gemini to power the AI Chef and Tutor features — messages you send to those features are processed by Google's API.</p>
+                  <p>Payment card details are handled entirely by our payment processor (Flutterwave); Cookify never receives or stores your card number.</p>
+                  <p>If you're an E-Restaurant seller, payment account details you add are shown to buyers who choose to order from you — only add details you're comfortable sharing.</p>
+                  <p>You can request deletion of your account and associated data at any time by contacting support.</p>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFlutterwave, closePaymentModal } from "flutterwave-react-v3";
-import { Loader2 } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { supabase } from "../supabase";
 
 const TIER_CONFIG = {
@@ -28,12 +28,46 @@ const TIER_CONFIG = {
 // transaction server-side (using the secret key, never exposed to the
 // browser) before marking the account as Pro/Pro+. A client-side click
 // alone can never grant either tier — it only opens checkout.
+//
+// IMPORTANT: useFlutterwave() is a hook, and hooks must run unconditionally
+// within whichever component calls them — but WHICH component mounts can
+// be conditional. So this file is split in two: the outer component here
+// never touches the Flutterwave hook at all if the public key is missing,
+// which guarantees a bad/missing env var can never crash the app (it did
+// exactly that before this fix, since the hook ran on every render,
+// including in the main app header for every logged-in user).
 export default function UpgradeButton({ authUser, currentTier, tier = "pro", onUpgraded, className }) {
-  const [verifying, setVerifying] = useState(false);
   const cfg = TIER_CONFIG[tier];
   const isActive = currentTier === tier;
-
   const publicKey = import.meta.env.VITE_FLW_PUBLIC_KEY || "";
+
+  if (!publicKey) {
+    return (
+      <button
+        type="button"
+        onClick={() => alert("Payments aren't configured yet — missing VITE_FLW_PUBLIC_KEY. Add it in your hosting provider's environment variables and redeploy.")}
+        className={className || "rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] border border-white/15 bg-white/5 text-gray-400"}
+      >
+        <span className="flex items-center gap-2"><Lock className="w-3 h-3" /> {cfg.label}</span>
+      </button>
+    );
+  }
+
+  return (
+    <UpgradeButtonActive
+      authUser={authUser}
+      isActive={isActive}
+      tier={tier}
+      cfg={cfg}
+      publicKey={publicKey}
+      onUpgraded={onUpgraded}
+      className={className}
+    />
+  );
+}
+
+function UpgradeButtonActive({ authUser, isActive, tier, cfg, publicKey, onUpgraded, className }) {
+  const [verifying, setVerifying] = useState(false);
   const planId = import.meta.env[cfg.planEnvKey] || "";
 
   const config = {
@@ -57,10 +91,6 @@ export default function UpgradeButton({ authUser, currentTier, tier = "pro", onU
   const handleFlutterPayment = useFlutterwave(config);
 
   const startCheckout = () => {
-    if (!publicKey) {
-      alert("Payments aren't configured yet — missing VITE_FLW_PUBLIC_KEY.");
-      return;
-    }
     if (!authUser) {
       alert(`Sign in with Google or Apple first — ${cfg.title} is tied to your account.`);
       return;
@@ -100,8 +130,8 @@ export default function UpgradeButton({ authUser, currentTier, tier = "pro", onU
     <button
       onClick={startCheckout}
       disabled={isActive || verifying}
-      className={className || `rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] transition ${
-        isActive ? "bg-white text-black border border-white/20" : "bg-white/10 text-white border border-white/15 hover:bg-white/20"
+      className={className || `rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] transition backdrop-blur-xl ${
+        isActive ? "bg-white/90 text-black border border-white/30" : "bg-white/10 text-white border border-white/15 hover:bg-white/20"
       }`}
     >
       {verifying ? (

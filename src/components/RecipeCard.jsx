@@ -16,6 +16,8 @@ export default function RecipeCard({
   onSaveRecipe,
   authProvider = null,
   authUser = null,
+  onExpand,
+  onNotInterested,
 }) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
@@ -25,6 +27,7 @@ export default function RecipeCard({
   const [shareCount, setShareCount] = useState(0);
   const [feedback, setFeedback] = useState("");
   const [showShareMenu, setShowShareMenu] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const canComment = authProvider === "google" || authProvider === "apple";
   const canLike = authProvider === "google" || authProvider === "apple"; // guests can't like
@@ -211,9 +214,33 @@ export default function RecipeCard({
             <h2 className="text-lg font-black text-white leading-tight">{title}</h2>
           </div>
         </div>
-        <button onClick={(ev) => ev.stopPropagation()} className="rounded-full border border-white/10 bg-white/5 p-2 text-white transition hover:bg-white/10">
-          <MoreHorizontal className="w-5 h-5" />
-        </button>
+        <div className="relative">
+          <button
+            onClick={(ev) => { ev.stopPropagation(); setMenuOpen((v) => !v); }}
+            className="rounded-full border border-white/10 bg-white/5 backdrop-blur-xl p-2 text-white transition hover:bg-white/10"
+          >
+            <MoreHorizontal className="w-5 h-5" />
+          </button>
+          {menuOpen && (
+            <div
+              onClick={(ev) => ev.stopPropagation()}
+              className="absolute right-0 top-11 z-20 w-44 overflow-hidden rounded-2xl border border-white/15 bg-black/80 backdrop-blur-2xl shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+            >
+              <button
+                onClick={() => { setMenuOpen(false); onExpand?.(); }}
+                className="block w-full px-4 py-3 text-left text-sm text-white transition hover:bg-white/10"
+              >
+                Expand
+              </button>
+              <button
+                onClick={() => { setMenuOpen(false); onNotInterested?.(); }}
+                className="block w-full px-4 py-3 text-left text-sm text-rose-300 transition hover:bg-white/10 border-t border-white/10"
+              >
+                Not interested
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <img src={image} alt={title} className="w-full h-[380px] object-cover" />
@@ -237,14 +264,14 @@ export default function RecipeCard({
               <button
                 onClick={handleLike}
                 disabled={likeBusy}
-                className={`rounded-full p-2 transition disabled:opacity-60 ${liked ? "bg-rose-500/20 text-rose-400" : "bg-white/5 text-white hover:bg-white/10"} ${!canLike ? "opacity-70" : ""}`}
+                className={`rounded-full p-2 backdrop-blur-xl transition disabled:opacity-60 ${liked ? "bg-rose-500/20 text-rose-400" : "bg-white/5 text-white hover:bg-white/10"} ${!canLike ? "opacity-70" : ""}`}
               >
                 <Heart className={`w-4 h-4 ${liked ? "fill-current" : ""}`} />
               </button>
               <span className="pr-1 text-sm text-gray-300">{likeCount}</span>
             </div>
             <div className="flex items-center gap-2 rounded-full bg-white/5 px-2 py-1.5">
-              <button onClick={handleComment} className="rounded-full p-2 bg-white/5 text-white transition hover:bg-white/10">
+              <button onClick={handleComment} className="rounded-full p-2 bg-white/5 backdrop-blur-xl text-white transition hover:bg-white/10">
                 <MessageSquare className="w-4 h-4" />
               </button>
               <button
@@ -255,7 +282,7 @@ export default function RecipeCard({
               </button>
             </div>
             <div className="relative flex items-center gap-2 rounded-full bg-white/5 px-2 py-1.5">
-              <button onClick={handleShare} className="rounded-full p-2 bg-white/5 text-white transition hover:bg-white/10">
+              <button onClick={handleShare} className="rounded-full p-2 bg-white/5 backdrop-blur-xl text-white transition hover:bg-white/10">
                 <Share2 className="w-4 h-4" />
               </button>
               <span className="pr-1 text-sm text-gray-300">{shareCount}</span>
@@ -269,7 +296,7 @@ export default function RecipeCard({
               )}
             </div>
           </div>
-          <button onClick={(ev) => { ev.stopPropagation(); onSaveRecipe?.(); }} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.35em] text-white transition hover:bg-white/10">
+          <button onClick={(ev) => { ev.stopPropagation(); onSaveRecipe?.(); }} className="rounded-full border border-white/10 bg-white/5 backdrop-blur-xl px-4 py-2 text-xs uppercase tracking-[0.35em] text-white transition hover:bg-white/10">
             Save Recipe
           </button>
         </div>

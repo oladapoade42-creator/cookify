@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import recipes from "../data/recipes";
 import RecipeCard from "../components/RecipeCard";
-import { Flame, Star, ChefHat, Camera, Loader2, X, ScanLine } from "lucide-react";
+import { Flame, Star, ChefHat, Camera, Loader2, X, ScanLine, ArrowLeft, MoreHorizontal, Volume2, Square, Mic } from "lucide-react";
 import { supabase } from "../supabase";
 import { pickNaturalVoice, stopSpeaking } from "../utils/voice";
 import { getDailyTrivia } from "../utils/dailyTrivia";
@@ -224,15 +224,45 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     setIsSearching(false);
   };
 
-  const sortedRecipes = useMemo(() => {
-    return [...recipes]
-      .map((recipe) => ({
-        ...recipe,
-        weeklyViews: (recipe.seedViews || 0) + (weeklyViews[recipe.id] || 0),
-        liveViewers: liveViewers[recipe.id] || getLiveCount(recipe, weeklyViews),
-      }))
-      .sort((a, b) => b.weeklyViews - a.weeklyViews);
-  }, [weeklyViews, liveViewers]);
+  // Deterministic per-week shuffle so "Trending This Week" genuinely
+  // rotates every week without needing a backend — same seed = same
+  // order for everyone during that week, and it changes next week.
+  const seededShuffle = (arr, seed) => {
+    const a = [...arr];
+    let s = seed;
+    for (let i = a.length - 1; i > 0; i--) {
+      s = (s * 9301 + 49297) % 233280;
+      const j = Math.floor((s / 233280) * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  const weekSeed = useMemo(() => {
+    const key = getWeekKey();
+    let hash = 0;
+    for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) % 100000;
+    return hash || 1;
+  }, []);
+
+  const [activeCategory, setActiveCategory] = useState(null); // null = all
+  const [dismissedIds, setDismissedIds] = useState(() => {
+    try {
+      const key = `cookify_dismissed_${getWeekKey()}`;
+      return JSON.parse(localStorage.getItem(key) || "[]");
+    } catch (e) {
+      return [];
+    }
+  });
+  const [expandedRecipe, setExpandedRecipe] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+
+  const dismissRecipe = (id) => {
+    const next = [...dismissedIds, id];
+    setDismissedIds(next);
+    localStorage.setItem(`cookify_dismissed_${getWeekKey()}`, JSON.stringify(next));
+    setOpenMenuId(null);
+  };
 
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
@@ -242,6 +272,25 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     }
     searchTimeoutRef.current = setTimeout(() => fetchMeals(searchQuery), 350);
   }, [searchQuery]);
+
+  const allRecipesWithStats = useMemo(() => {
+    return recipes.map((recipe) => ({
+      ...recipe,
+      weeklyViews: (recipe.seedViews || 0) + (weeklyViews[recipe.id] || 0),
+      liveViewers: liveViewers[recipe.id] || getLiveCount(recipe, weeklyViews),
+    }));
+  }, [weeklyViews, liveViewers]);
+
+  const sortedRecipes = useMemo(() => {
+    const visible = allRecipesWithStats.filter((r) => !dismissedIds.includes(r.id));
+    const scoped = activeCategory ? visible.filter((r) => r.category === activeCategory) : visible;
+    // Weekly-seeded shuffle establishes this week's featured order, then
+    // actual view counts break ties within that tier — so it still feels
+    // "trending" while genuinely changing week to week.
+    return seededShuffle(scoped, weekSeed).sort((a, b) => {
+      return Math.floor(b.weeklyViews / 100) - Math.floor(a.weeklyViews / 100);
+    });
+  }, [allRecipesWithStats, dismissedIds, activeCategory, weekSeed]);
 
   const handleSelectMeal = (meal) => {
     setSelectedMeal(meal);
@@ -503,6 +552,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   };
 
   return (
+    <>
     <div className="min-h-screen bg-black text-white rounded-3xl p-6 mb-6">
       {isScannerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
@@ -596,19 +646,44 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
           </div>
 
           <div className="mt-4 flex gap-3 overflow-x-auto px-3 pb-2">
-            {['Rice', 'Pasta', 'Chicken', 'Dessert', 'Favorites'].map((item) => (
-              <button
-                key={item}
-                onClick={(ev) => {
-                  ev.preventDefault();
-                  if (item === 'Favorites') onOpenFavorites?.();
-                }}
-                className="shrink-0 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[10px] uppercase tracking-[0.35em] text-white transition hover:bg-white/10"
-              >
-                {item}
-              </button>
-            ))}
+            {['Rice', 'Pasta', 'Chicken', 'Dessert', 'Favorites'].map((item) => {
+              const isActive = item !== 'Favorites' && activeCategory === item;
+              return (
+                <button
+                  key={item}
+                  onClick={(ev) => {
+                    ev.preventDefault();
+                    if (item === 'Favorites') { onOpenFavorites?.(); return; }
+                    setActiveCategory((prev) => (prev === item ? null : item));
+                  }}
+                  className={`shrink-0 rounded-full border px-4 py-2 text-[10px] uppercase tracking-[0.35em] transition backdrop-blur-xl ${
+                    isActive
+                      ? "border-white/40 bg-white/25 text-white shadow-[0_4px_20px_rgba(255,255,255,0.15)]"
+                      : "border-white/10 bg-white/5 text-white hover:bg-white/10"
+                  }`}
+                >
+                  {item}
+                </button>
+              );
+            })}
           </div>
+
+          {activeCategory && (
+            <div className="mt-2 flex gap-2 overflow-x-auto px-3 pb-1">
+              {recipes.filter((r) => r.category === activeCategory).map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => {
+                    const withStats = allRecipesWithStats.find((x) => x.id === r.id);
+                    if (withStats) setExpandedRecipe(withStats);
+                  }}
+                  className="shrink-0 rounded-full border border-white/10 bg-white/5 backdrop-blur-xl px-3 py-1.5 text-[10px] text-gray-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  {r.title}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -658,6 +733,8 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
                 onClick={() => openTutorForMeal(recipe)}
                 onCookNow={() => openTutorForMeal(recipe)}
                 onSaveRecipe={() => onSaveRecipe?.(recipe)}
+                onExpand={() => setExpandedRecipe(recipe)}
+                onNotInterested={() => dismissRecipe(recipe.id)}
               />
             ))}
         </div>
@@ -744,29 +821,47 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
 
       {tutorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
-          <div className="w-full max-w-[700px] rounded-[20px] border border-white/10 bg-zinc-950 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.5)]">
-            <div className="flex items-center justify-between mb-3">
-              <div>
+          <div className="w-full max-w-[700px] max-h-[92vh] overflow-y-auto rounded-[20px] border border-white/10 bg-zinc-950 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.5)]">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="min-w-0">
                 <p className="text-xs uppercase tracking-[0.3em] text-gray-400">AI Cooking Tutor</p>
-                <h3 className="text-lg font-bold">{selectedMeal?.name}</h3>
+                <h3 className="text-lg font-bold truncate">{selectedMeal?.name}</h3>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={() => speakText(tutorMessages.slice().reverse().find(m=>m.role==='assistant')?.text || 'Repeating...')}
                   disabled={isSpeaking}
-                  className="px-3 py-2 rounded-md bg-white text-black disabled:opacity-50"
+                  aria-label="Speak"
+                  title="Speak"
+                  className="rounded-full border border-white/15 bg-white/90 backdrop-blur-xl p-2.5 text-black disabled:opacity-40"
                 >
-                  {isSpeaking ? 'Speaking...' : 'Speak'}
+                  <Volume2 className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => { stopSpeaking(); setIsSpeaking(false); }}
                   disabled={!isSpeaking}
-                  className="px-3 py-2 rounded-md border border-white/15 text-white disabled:opacity-30"
+                  aria-label="Stop"
+                  title="Stop"
+                  className="rounded-full border border-white/15 bg-white/10 backdrop-blur-xl p-2.5 text-white disabled:opacity-30"
                 >
-                  Stop
+                  <Square className="h-4 w-4" />
                 </button>
-                <button onClick={handleStartListening} className={`px-3 py-2 rounded-md ${isRecognizing? 'bg-rose-600 text-white': 'bg-white text-black'}`}>{isRecognizing? 'Listening...' : 'Listen'}</button>
-                <button onClick={closeTutor} className="px-3 py-2 rounded-md border border-white/10">Close</button>
+                <button
+                  onClick={handleStartListening}
+                  aria-label="Listen"
+                  title="Listen"
+                  className={`rounded-full border p-2.5 backdrop-blur-xl ${isRecognizing ? 'border-rose-400 bg-rose-500/80 text-white' : 'border-white/15 bg-white/10 text-white'}`}
+                >
+                  <Mic className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={closeTutor}
+                  aria-label="Close"
+                  title="Close"
+                  className="rounded-full border border-white/15 bg-white/10 backdrop-blur-xl p-2.5 text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
             </div>
 
@@ -787,21 +882,6 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
           </div>
         </div>
       )}
-      <div className="flex gap-3 overflow-x-auto mb-6">
-        <button className="bg-gradient-to-r from-orange-400 to-rose-400 text-black rounded-[24px] px-4 py-2 shadow-[0_16px_40px_rgba(249,115,22,0.2)]">
-            Rice
-        </button>
-        <button className="bg-gradient-to-r from-sky-400 to-indigo-500 text-black rounded-[24px] px-4 py-2 shadow-[0_16px_40px_rgba(56,189,248,0.2)]">
-            Pasta
-        </button>
-        <button className="bg-gradient-to-r from-emerald-400 to-teal-500 text-black rounded-[24px] px-4 py-2 shadow-[0_16px_40px_rgba(16,185,129,0.2)]">
-            Chicken
-        </button>
-        <button className="bg-gradient-to-r from-fuchsia-400 to-pink-500 text-black rounded-[24px] px-4 py-2 shadow-[0_16px_40px_rgba(236,72,153,0.2)]">
-            Dessert
-        </button>
-      </div>
-
       {/* XP Card */}
 
       <div className="mt-8 bg-zinc-900/80 rounded-3xl p-6 border border-white/10">
@@ -837,20 +917,20 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
 
       <div className="grid grid-cols-2 gap-4 mt-4">
 
-        <button onClick={() => openTutorForMeal(getDefaultTutorMeal())} className="bg-white text-black rounded-[24px] p-6 shadow-[0_12px_30px_rgba(255,255,255,0.08)]">
+        <button onClick={() => openTutorForMeal(getDefaultTutorMeal())} className="bg-white/90 backdrop-blur-xl text-black rounded-[24px] p-6 shadow-[0_12px_30px_rgba(255,255,255,0.08)]">
           <ChefHat className="mx-auto mb-3" />
           AI Chef
         </button>
 
         <button
           onClick={openScanner}
-          className="bg-neutral-900 rounded-[24px] p-6 border border-neutral-700"
+          className="bg-white/5 backdrop-blur-xl rounded-[24px] p-6 border border-white/10"
         >
           <Camera className="mx-auto mb-3" />
           Scan Food
         </button>
 
-<button onClick={onOpenFavorites} className="bg-neutral-900 rounded-[24px] p-6 border border-neutral-700">
+<button onClick={onOpenFavorites} className="bg-white/5 backdrop-blur-xl rounded-[24px] p-6 border border-white/10">
           <Star className="mx-auto mb-3" />
           Favorites
         </button>
@@ -957,6 +1037,52 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
       </div>
 
     </div>
+
+    {expandedRecipe && (
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-white/10 bg-black/90 backdrop-blur-xl p-4">
+          <button
+            onClick={() => setExpandedRecipe(null)}
+            className="rounded-full border border-white/15 bg-white/5 backdrop-blur-xl p-2 text-white transition hover:bg-white/10"
+            aria-label="Back to feed"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h2 className="text-lg font-black text-white">{expandedRecipe.title}</h2>
+        </div>
+
+        <img src={expandedRecipe.image} alt={expandedRecipe.title} className="w-full h-72 object-cover" />
+
+        <div className="p-5 text-white">
+          <div className="flex flex-wrap gap-3 text-xs uppercase tracking-[0.35em] text-gray-400">
+            <span>{expandedRecipe.category}</span>
+            <span>•</span>
+            <span>{expandedRecipe.time}</span>
+            <span>•</span>
+            <span>{expandedRecipe.difficulty}</span>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
+            <Star className="h-4 w-4 fill-current text-yellow-400" />
+            {expandedRecipe.rating} · {expandedRecipe.weeklyViews?.toLocaleString?.() ?? expandedRecipe.weeklyViews} views this week
+          </div>
+
+          <button
+            onClick={() => { openTutorForMeal(expandedRecipe); setExpandedRecipe(null); }}
+            className="mt-6 w-full rounded-[24px] bg-white py-3 font-bold text-black shadow-[0_10px_25px_rgba(255,255,255,0.1)]"
+          >
+            Cook with AI Tutor
+          </button>
+          <button
+            onClick={() => onSaveRecipe?.(expandedRecipe)}
+            className="mt-3 w-full rounded-[24px] border border-white/15 bg-white/5 backdrop-blur-xl py-3 font-bold text-white"
+          >
+            Save to Favorites
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 
