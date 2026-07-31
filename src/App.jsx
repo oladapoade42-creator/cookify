@@ -1,3 +1,4 @@
+import { inject } from '@vercel/analytics';
 import { supabase } from './supabase';
 import RecipeCard from "./components/RecipeCard";
 import XPCard from "./components/XPCard";
@@ -31,6 +32,10 @@ import {
 } from 'lucide-react';
 
 export default function App() {
+  useEffect (() => {
+    //This ensures it only runs safely in the browser context
+    inject();
+  }, []);
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authProvider, setAuthProvider] = useState(null); // 'google' | 'apple' | 'guest'
