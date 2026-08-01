@@ -18,6 +18,8 @@ export default function RecipeCard({
   onExpand,
   onNotInterested,
   nutrition = null, // { calories, protein, carbs, fat }
+  description = null, // short blurb about the dish, shown in the expanded detail view
+  instructions = null, // string or array of prep steps, shown in the expanded detail view
 }) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
@@ -30,6 +32,16 @@ export default function RecipeCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [postingComment, setPostingComment] = useState(false);
+
+  // Prep instructions can arrive as a clean array (local recipes) or as one
+  // raw block of text with its own line breaks (dishes pulled from search).
+  // Normalize both into a simple list of steps to render.
+  const prepSteps = Array.isArray(instructions)
+    ? instructions.filter(Boolean)
+    : (instructions || "")
+        .split(/\r?\n+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
 
   const canComment = authProvider === "google" || authProvider === "apple";
   const canLike = authProvider === "google" || authProvider === "apple"; // guests can't like
@@ -324,6 +336,32 @@ export default function RecipeCard({
               <p className="text-lg font-black text-white">{nutrition.fat}</p>
               <p className="text-[10px] uppercase tracking-wide text-gray-500">Fat</p>
             </div>
+          </div>
+        )}
+
+        {(description || prepSteps.length > 0) && (
+          <div className="cookify-detail-in space-y-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-5">
+            {description && (
+              <div>
+                <p className="text-xs uppercase tracking-[0.35em] text-gray-500 mb-2">About this dish</p>
+                <p className="text-sm leading-6 text-gray-300">{description}</p>
+              </div>
+            )}
+            {prepSteps.length > 0 && (
+              <div>
+                <p className="text-xs uppercase tracking-[0.35em] text-gray-500 mb-3">How to prepare</p>
+                <ol className="space-y-3">
+                  {prepSteps.map((step, i) => (
+                    <li key={i} className="flex gap-3 text-sm leading-6 text-gray-300">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/10 text-xs font-bold text-white">
+                        {i + 1}
+                      </span>
+                      <span className="pt-0.5">{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
           </div>
         )}
 

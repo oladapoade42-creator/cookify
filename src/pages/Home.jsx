@@ -795,11 +795,25 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
             rating={4.8}
             weeklyViews={weeklyViews[selectedMeal.id] || 0}
             nutrition={mealNutrition}
+            description={dishHistory || undefined}
+            instructions={selectedMeal.instructions}
             authProvider={authProvider}
             authUser={authUser}
             onClick={() => openTutorForMeal(selectedMeal)}
             onCookNow={() => openTutorForMeal(selectedMeal)}
             onSaveRecipe={() => onSaveRecipe?.(selectedMeal)}
+            onExpand={() => setExpandedRecipe({
+              id: `meal-${selectedMeal.id}`,
+              title: selectedMeal.name,
+              image: selectedMeal.image,
+              time: "—",
+              difficulty: selectedMeal.category || "—",
+              rating: 4.8,
+              weeklyViews: weeklyViews[selectedMeal.id] || 0,
+              nutrition: mealNutrition,
+              description: dishHistory || undefined,
+              instructions: selectedMeal.instructions,
+            })}
           />
           {(loadingHistory || dishHistory) && (
             <div className="mt-3 rounded-2xl border border-white/10 bg-black/40 p-3">
@@ -1034,8 +1048,8 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     </div>
 
     {expandedRecipe && (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-white/10 bg-black/90 backdrop-blur-xl p-4">
+      <div className="cookify-backdrop-in fixed inset-0 z-[60] bg-black overflow-y-auto">
+        <div className="cookify-sheet-in sticky top-0 z-10 flex items-center gap-3 border-b border-white/10 bg-black/90 backdrop-blur-xl p-4">
           <button
             onClick={() => setExpandedRecipe(null)}
             className="rounded-full border border-white/15 bg-white/5 backdrop-blur-xl p-2 text-white transition hover:bg-white/10"
@@ -1046,7 +1060,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
           <h2 className="text-lg font-black text-white">{expandedRecipe.title}</h2>
         </div>
 
-        <div className="p-4">
+        <div className="cookify-sheet-in p-4">
           <RecipeCard
             recipeId={expandedRecipe.id}
             title={expandedRecipe.title}
@@ -1056,6 +1070,8 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
             rating={expandedRecipe.rating}
             weeklyViews={expandedRecipe.weeklyViews}
             nutrition={expandedRecipe.nutrition}
+            description={expandedRecipe.description}
+            instructions={expandedRecipe.instructions}
             authProvider={authProvider}
             authUser={authUser}
             onClick={() => { openTutorForMeal(expandedRecipe); setExpandedRecipe(null); }}
