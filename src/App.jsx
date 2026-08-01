@@ -259,13 +259,22 @@ export default function App() {
     setFavorites((prev) => prev.filter((item) => String(item.id) !== String(recipeId)));
   };
 
+  const [theme, setTheme] = useState(() => localStorage.getItem('cookify_theme') || 'dark');
+  const toggleTheme = () => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('cookify_theme', next);
+      return next;
+    });
+  };
+
   // If not logged in, show the Auth Screen
   if (!isAuthenticated) {
     return <AuthScreen onLogin={handleLogin} />;
   }
 
   return (
-    <div className="relative flex flex-col h-screen w-full max-w-[430px] mx-auto bg-slate-950 text-white overflow-hidden shadow-[0_20px_80px_rgba(0,0,0,0.45)] sm:rounded-[32px]">
+    <div className={`relative flex flex-col h-screen w-full max-w-[430px] mx-auto bg-slate-950 text-white overflow-hidden shadow-[0_20px_80px_rgba(0,0,0,0.45)] sm:rounded-[32px] ${theme === 'light' ? 'light-theme' : ''}`}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_18%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.04),transparent_18%),linear-gradient(180deg,rgba(0,0,0,0.95),rgba(0,0,0,0.99))]" />
       {/* Top Header */}
       <header title="Cookify - Learn, Cook, Enjoy" className="relative flex flex-col gap-3 px-4 py-4 bg-black/80 backdrop-blur-3xl border-b border-white/10 z-10 shrink-0">
@@ -314,6 +323,7 @@ export default function App() {
               callGeminiApi={callGeminiApi}
               onOrderNow={(listingId) => { setOpenListingId(listingId); setActiveTab('restaurant'); }}
               authUser={authUser}
+              tier={tier}
             />
           )}
           {activeTab === 'learn' && <Learn />}
@@ -344,6 +354,9 @@ export default function App() {
               isPremium={isPremium}
               onBack={() => setActiveTab('profile')}
               onLogout={() => setIsAuthenticated(false)}
+              theme={theme}
+              onToggleTheme={toggleTheme}
+              authUser={authUser}
             />
           )}
         </div>

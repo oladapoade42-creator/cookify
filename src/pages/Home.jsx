@@ -5,6 +5,7 @@ import { Flame, Star, ChefHat, Camera, Loader2, X, ScanLine, ArrowLeft, MoreHori
 import { supabase } from "../supabase";
 import { pickNaturalVoice, stopSpeaking } from "../utils/voice";
 import { getDailyTrivia } from "../utils/dailyTrivia";
+import AdSlot from "../components/AdSlot";
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
@@ -59,7 +60,7 @@ async function analyzeFoodImage(imageBase64, mode = "calories") {
   }
 }
 
-export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRecipe, onOpenFavorites, onRecipeCooked, cookedCount = 0, streak = 0, xp = 0, authProvider = null, dailyChallengeDone = false, dailyAnswers = {}, onAnswerChallenge, callGeminiApi, onOrderNow, authUser = null }) {
+export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRecipe, onOpenFavorites, onRecipeCooked, cookedCount = 0, streak = 0, xp = 0, authProvider = null, dailyChallengeDone = false, dailyAnswers = {}, onAnswerChallenge, callGeminiApi, onOrderNow, authUser = null, tier = null }) {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scanMode, setScanMode] = useState("calories"); // 'calories' | 'dietplan' | 'ingredients'
   const [challengeOpen, setChallengeOpen] = useState(false);
@@ -130,10 +131,10 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   const [isSearching, setIsSearching] = useState(false);
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [dishHistory, setDishHistory] = useState("");
+  const [mealNutrition, setMealNutrition] = useState(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const searchTimeoutRef = useRef(null);
   const [weeklyViews, setWeeklyViews] = useState({});
-  const [liveViewers, setLiveViewers] = useState({});
   // AI Tutor state
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorMessages, setTutorMessages] = useState([]); // {role:'user'|'assistant', text}
@@ -163,37 +164,14 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     onTutorOpened?.();
   }, [openTutorSignal]);
 
-  const getLiveCount = (recipe, currentCounts) => {
-    const base = (recipe.seedViews || 0) + (currentCounts?.[recipe.id] || 0);
-    return Math.max(5, Math.min(48, 6 + Math.floor(base / 120)));
-  };
-
   useEffect(() => {
     const weekKey = getWeekKey();
     const saved = JSON.parse(localStorage.getItem(`cookify_weekly_views_${weekKey}`) || "{}");
     setWeeklyViews(saved);
-    setLiveViewers(
-      recipes.reduce((acc, recipe) => {
-        acc[recipe.id] = getLiveCount(recipe, saved);
-        return acc;
-      }, {})
-    );
-
-    const interval = setInterval(() => {
-      setLiveViewers((prev) => {
-        const next = { ...prev };
-        recipes.forEach((recipe) => {
-          const delta = Math.round((Math.random() - 0.5) * 6);
-          next[recipe.id] = Math.max(5, next[recipe.id] + delta);
-        });
-        return next;
-      });
-    }, 18000);
 
     return () => {
       stopCamera();
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-      clearInterval(interval);
     };
   }, []);
 
@@ -276,10 +254,9 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   const allRecipesWithStats = useMemo(() => {
     return recipes.map((recipe) => ({
       ...recipe,
-      weeklyViews: (recipe.seedViews || 0) + (weeklyViews[recipe.id] || 0),
-      liveViewers: liveViewers[recipe.id] || getLiveCount(recipe, weeklyViews),
+      weeklyViews: weeklyViews[recipe.id] || 0,
     }));
-  }, [weeklyViews, liveViewers]);
+  }, [weeklyViews]);
 
   const sortedRecipes = useMemo(() => {
     const visible = allRecipesWithStats.filter((r) => !dismissedIds.includes(r.id));
@@ -305,6 +282,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     localStorage.setItem(`cookify_weekly_views_${weekKey}`, JSON.stringify(nextViews));
     recordGlobalDishView(meal);
     fetchDishHistory(meal);
+    fetchMealNutrition(meal);
   };
 
   const fetchDishHistory = async (meal) => {
@@ -314,6 +292,19 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     const text = await sendPromptToGemini(prompt);
     setDishHistory(text);
     setLoadingHistory(false);
+  };
+
+  const fetchMealNutrition = async (meal) => {
+    setMealNutrition(null);
+    const prompt = `Estimate typical nutrition facts for one serving of "${meal.name}". Respond with ONLY valid JSON, no markdown, in exactly this shape: {"calories": 450, "protein": "20g", "carbs": "50g", "fat": "15g"}`;
+    const text = await sendPromptToGemini(prompt);
+    try {
+      const cleaned = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      if (parsed.calories) setMealNutrition(parsed);
+    } catch (e) {
+      // AI didn't return clean JSON — just skip showing nutrition for this dish
+    }
   };
 
   // Best-effort global view counter for the "Top Dishes" ranking (Learn tab).
@@ -717,25 +708,26 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
       <h2 className="text-2xl font-bold mb-4 px-3 mt-8">Trending This Week</h2>
 
       <div className="space-y-6 mt-6">
-            {sortedRecipes.map((recipe) => (
-              <RecipeCard
-                key={recipe.id}
-                recipeId={recipe.id}
-                title={recipe.title}
-                image={recipe.image}
-                time={recipe.time}
-                difficulty={recipe.difficulty}
-                rating={recipe.rating}
-                weeklyViews={recipe.weeklyViews}
-                liveViewers={recipe.liveViewers}
-                authProvider={authProvider}
-                authUser={authUser}
-                onClick={() => openTutorForMeal(recipe)}
-                onCookNow={() => openTutorForMeal(recipe)}
-                onSaveRecipe={() => onSaveRecipe?.(recipe)}
-                onExpand={() => setExpandedRecipe(recipe)}
-                onNotInterested={() => dismissRecipe(recipe.id)}
-              />
+            {sortedRecipes.map((recipe, i) => (
+              <div key={recipe.id} className="space-y-6">
+                <RecipeCard
+                  recipeId={recipe.id}
+                  title={recipe.title}
+                  image={recipe.image}
+                  time={recipe.time}
+                  difficulty={recipe.difficulty}
+                  rating={recipe.rating}
+                  weeklyViews={recipe.weeklyViews}
+                  authProvider={authProvider}
+                  authUser={authUser}
+                  onClick={() => openTutorForMeal(recipe)}
+                  onCookNow={() => openTutorForMeal(recipe)}
+                  onSaveRecipe={() => onSaveRecipe?.(recipe)}
+                  onExpand={() => setExpandedRecipe(recipe)}
+                  onNotInterested={() => dismissRecipe(recipe.id)}
+                />
+                {(i + 1) % 4 === 0 && <AdSlot tier={tier} />}
+              </div>
             ))}
         </div>
       <div className="grid grid-cols-2 gap-4 mt-6">
@@ -793,29 +785,32 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
       </div>
 
       {selectedMeal && (
-        <div className="mt-4 rounded-2xl border border-white/10 bg-zinc-900/80 p-4">
-          <div className="flex gap-4">
-            <img src={selectedMeal.image} alt={selectedMeal.name} className="w-24 h-24 rounded-md object-cover" />
-            <div>
-              <h3 className="font-bold text-lg">{selectedMeal.name}</h3>
-              <p className="text-sm text-gray-400">{selectedMeal.area} • {selectedMeal.category}</p>
-              <p className="mt-2 text-sm text-gray-300" style={{maxHeight: '5.5rem', overflow: 'hidden'}}>{selectedMeal.instructions}</p>
-              <div className="mt-3 flex gap-3">
-                <button onClick={() => openTutorForMeal(selectedMeal)} className="rounded-[24px] bg-white px-4 py-2 font-bold text-black shadow-[0_10px_25px_rgba(255,255,255,0.08)]">Open AI Tutor</button>
-                <button onClick={() => window.open(selectedMeal.image, '_blank')} className="rounded-[24px] border border-white/10 px-4 py-2">View Image</button>
-              </div>
-              {(loadingHistory || dishHistory) && (
-                <div className="mt-3 rounded-2xl border border-white/10 bg-black/40 p-3">
-                  <p className="text-[10px] uppercase tracking-[0.3em] text-gray-500 mb-1">Dish History</p>
-                  {loadingHistory ? (
-                    <p className="text-sm text-gray-400 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Looking up the story behind this dish...</p>
-                  ) : (
-                    <p className="text-sm text-gray-300 leading-6">{dishHistory}</p>
-                  )}
-                </div>
+        <div className="mt-4">
+          <RecipeCard
+            recipeId={`meal-${selectedMeal.id}`}
+            title={selectedMeal.name}
+            image={selectedMeal.image}
+            time="—"
+            difficulty={selectedMeal.category || "—"}
+            rating={4.8}
+            weeklyViews={weeklyViews[selectedMeal.id] || 0}
+            nutrition={mealNutrition}
+            authProvider={authProvider}
+            authUser={authUser}
+            onClick={() => openTutorForMeal(selectedMeal)}
+            onCookNow={() => openTutorForMeal(selectedMeal)}
+            onSaveRecipe={() => onSaveRecipe?.(selectedMeal)}
+          />
+          {(loadingHistory || dishHistory) && (
+            <div className="mt-3 rounded-2xl border border-white/10 bg-black/40 p-3">
+              <p className="text-[10px] uppercase tracking-[0.3em] text-gray-500 mb-1">Dish History</p>
+              {loadingHistory ? (
+                <p className="text-sm text-gray-400 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Looking up the story behind this dish...</p>
+              ) : (
+                <p className="text-sm text-gray-300 leading-6">{dishHistory}</p>
               )}
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1051,34 +1046,22 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
           <h2 className="text-lg font-black text-white">{expandedRecipe.title}</h2>
         </div>
 
-        <img src={expandedRecipe.image} alt={expandedRecipe.title} className="w-full h-72 object-cover" />
-
-        <div className="p-5 text-white">
-          <div className="flex flex-wrap gap-3 text-xs uppercase tracking-[0.35em] text-gray-400">
-            <span>{expandedRecipe.category}</span>
-            <span>•</span>
-            <span>{expandedRecipe.time}</span>
-            <span>•</span>
-            <span>{expandedRecipe.difficulty}</span>
-          </div>
-
-          <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
-            <Star className="h-4 w-4 fill-current text-yellow-400" />
-            {expandedRecipe.rating} · {expandedRecipe.weeklyViews?.toLocaleString?.() ?? expandedRecipe.weeklyViews} views this week
-          </div>
-
-          <button
+        <div className="p-4">
+          <RecipeCard
+            recipeId={expandedRecipe.id}
+            title={expandedRecipe.title}
+            image={expandedRecipe.image}
+            time={expandedRecipe.time}
+            difficulty={expandedRecipe.difficulty}
+            rating={expandedRecipe.rating}
+            weeklyViews={expandedRecipe.weeklyViews}
+            nutrition={expandedRecipe.nutrition}
+            authProvider={authProvider}
+            authUser={authUser}
             onClick={() => { openTutorForMeal(expandedRecipe); setExpandedRecipe(null); }}
-            className="mt-6 w-full rounded-[24px] bg-white py-3 font-bold text-black shadow-[0_10px_25px_rgba(255,255,255,0.1)]"
-          >
-            Cook with AI Tutor
-          </button>
-          <button
-            onClick={() => onSaveRecipe?.(expandedRecipe)}
-            className="mt-3 w-full rounded-[24px] border border-white/15 bg-white/5 backdrop-blur-xl py-3 font-bold text-white"
-          >
-            Save to Favorites
-          </button>
+            onCookNow={() => { openTutorForMeal(expandedRecipe); setExpandedRecipe(null); }}
+            onSaveRecipe={() => onSaveRecipe?.(expandedRecipe)}
+          />
         </div>
       </div>
     )}

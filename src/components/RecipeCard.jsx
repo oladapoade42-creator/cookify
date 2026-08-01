@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal } from "lucide-react";
+import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X } from "lucide-react";
 import { supabase } from "../supabase";
 
 export default function RecipeCard({
@@ -12,12 +12,12 @@ export default function RecipeCard({
   onClick,
   onCookNow,
   weeklyViews = 0,
-  liveViewers = 0,
   onSaveRecipe,
   authProvider = null,
   authUser = null,
   onExpand,
   onNotInterested,
+  nutrition = null, // { calories, protein, carbs, fat }
 }) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
@@ -28,6 +28,8 @@ export default function RecipeCard({
   const [feedback, setFeedback] = useState("");
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
 
   const canComment = authProvider === "google" || authProvider === "apple";
   const canLike = authProvider === "google" || authProvider === "apple"; // guests can't like
@@ -115,32 +117,35 @@ export default function RecipeCard({
     setLikeBusy(false);
   };
 
-  const handleComment = async (ev) => {
+  const handleComment = (ev) => {
     ev.stopPropagation();
+    setShowComments(true);
+  };
 
+  const postComment = async () => {
     if (!canComment) {
       setFeedback("Sign in with Google or Apple to comment on recipes.");
       return;
     }
+    const text = commentDraft.trim();
+    if (!text) return;
 
-    const draft = window.prompt(`Leave a comment for ${title}:`);
-    if (!draft || !draft.trim()) return;
-
+    setPostingComment(true);
     const newComment = {
       recipe_id: String(recipeId),
       provider: authProvider,
-      text: draft.trim(),
+      text,
     };
 
     try {
       const { data, error } = await supabase.from("comments").insert(newComment).select().single();
       if (error) throw error;
       setComments((prev) => [data, ...prev]);
-      setShowComments(true);
-      setFeedback("Comment posted.");
+      setCommentDraft("");
     } catch (e) {
       setFeedback("Comments aren't set up on the backend yet — this comment wasn't saved.");
     }
+    setPostingComment(false);
   };
 
   const handleShare = async (ev) => {
@@ -301,25 +306,88 @@ export default function RecipeCard({
           </button>
         </div>
 
+        {nutrition && (
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <div className="rounded-xl bg-black/40 border border-white/10 p-2">
+              <p className="text-lg font-black text-white">{nutrition.calories}</p>
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">Cal</p>
+            </div>
+            <div className="rounded-xl bg-black/40 border border-white/10 p-2">
+              <p className="text-lg font-black text-white">{nutrition.protein}</p>
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">Protein</p>
+            </div>
+            <div className="rounded-xl bg-black/40 border border-white/10 p-2">
+              <p className="text-lg font-black text-white">{nutrition.carbs}</p>
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">Carbs</p>
+            </div>
+            <div className="rounded-xl bg-black/40 border border-white/10 p-2">
+              <p className="text-lg font-black text-white">{nutrition.fat}</p>
+              <p className="text-[10px] uppercase tracking-wide text-gray-500">Fat</p>
+            </div>
+          </div>
+        )}
+
         {feedback && <p className="text-sm text-emerald-300">{feedback}</p>}
 
         {showComments && (
-          <div className="rounded-2xl border border-white/10 bg-black/40 p-3 space-y-2 max-h-40 overflow-y-auto">
-            {comments.length === 0 ? (
-              <p className="text-sm text-gray-500">No comments yet — be the first.</p>
-            ) : (
-              comments.map((c) => (
-                <div key={c.id} className="text-sm">
-                  <span className="text-gray-400 uppercase text-[10px] tracking-wide mr-2">{c.provider}</span>
-                  <span className="text-gray-200">{c.text}</span>
+          <div
+            onClick={(ev) => ev.stopPropagation()}
+            className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-sm"
+          >
+            <div className="w-full sm:max-w-[480px] sm:rounded-[28px] rounded-t-[28px] border border-white/10 bg-zinc-950 max-h-[85vh] flex flex-col">
+              <div className="flex items-center justify-between border-b border-white/10 p-4">
+                <div>
+                  <h3 className="font-black text-white">Comments</h3>
+                  <p className="text-xs text-gray-500">{comments.length} on {title}</p>
                 </div>
-              ))
-            )}
-            {!canComment && (
-              <p className="text-xs text-gray-500 pt-1 border-t border-white/10">
-                Sign in with Google or Apple to leave a comment.
-              </p>
-            )}
+                <button onClick={() => setShowComments(false)} className="rounded-full border border-white/10 bg-white/5 p-2 text-white">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {comments.length === 0 ? (
+                  <p className="text-sm text-gray-500 text-center py-6">No comments yet — be the first.</p>
+                ) : (
+                  comments.map((c) => (
+                    <div key={c.id} className="flex gap-3">
+                      <div className="h-9 w-9 shrink-0 rounded-full bg-white/10 border border-white/10 grid place-items-center text-xs font-bold text-white uppercase">
+                        {c.provider?.[0] || "?"}
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide">{c.provider}</p>
+                        <p className="text-sm text-gray-200 mt-0.5">{c.text}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="border-t border-white/10 p-3">
+                {canComment ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={commentDraft}
+                      onChange={(e) => setCommentDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && postComment()}
+                      placeholder="Add a comment..."
+                      className="flex-1 rounded-full bg-white/5 border border-white/10 px-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none focus:border-white/30"
+                    />
+                    <button
+                      onClick={postComment}
+                      disabled={postingComment || !commentDraft.trim()}
+                      className="rounded-full bg-white text-black px-4 py-2.5 text-sm font-bold disabled:opacity-40"
+                    >
+                      Post
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-center text-xs text-gray-500 py-2">
+                    Sign in with Google or Apple to leave a comment.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

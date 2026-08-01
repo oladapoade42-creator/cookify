@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Bell, Moon, LogOut, Crown, ChevronRight } from "lucide-react";
+import { ArrowLeft, Bell, Moon, Sun, LogOut, Crown, ChevronRight, Trash2, Loader2 } from "lucide-react";
+import { supabase } from "../supabase";
 
-export default function Settings({ isPremium = false, onBack = () => {}, onLogout = () => {} }) {
+export default function Settings({ isPremium = false, onBack = () => {}, onLogout = () => {}, theme = "dark", onToggleTheme = () => {}, authUser = null }) {
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [notifications, setNotifications] = useState(
     typeof Notification !== "undefined" && Notification.permission === "granted"
   );
@@ -85,6 +88,23 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
               />
             </button>
           </div>
+          <div className="flex items-center justify-between py-2">
+            <div className="flex items-center gap-3">
+              {theme === "light" ? <Sun className="h-5 w-5 text-white/80" /> : <Moon className="h-5 w-5 text-white/80" />}
+              <span className="font-medium">Light Mode</span>
+            </div>
+            <button
+              onClick={onToggleTheme}
+              className={`h-7 w-12 rounded-full transition ${theme === "light" ? "bg-white" : "bg-white/10"}`}
+              aria-pressed={theme === "light"}
+            >
+              <span
+                className={`block h-6 w-6 rounded-full shadow transition-transform ${
+                  theme === "light" ? "translate-x-5 bg-black" : "translate-x-0.5 bg-gray-500"
+                }`}
+              />
+            </button>
+          </div>
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
@@ -98,6 +118,60 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
             </div>
             <ChevronRight className="h-5 w-5 text-white/40" />
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-rose-500/20 bg-rose-500/5 p-5">
+          <div className="flex items-center gap-3 mb-2">
+            <Trash2 className="h-5 w-5 text-rose-300" />
+            <p className="font-medium text-rose-200">Remove Profile</p>
+          </div>
+          <p className="text-sm text-gray-400 mb-4">
+            Permanently deletes your account, favorites, comments, likes, subscription, and any food listings you've posted. This can't be undone.
+          </p>
+
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="w-full rounded-2xl border border-rose-400/40 bg-rose-500/10 py-3 font-bold text-rose-200"
+            >
+              Remove Profile
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-center text-xs text-rose-300">Are you sure? This is permanent.</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="flex-1 rounded-2xl border border-white/15 bg-white/5 py-3 font-bold text-white"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!authUser) { onLogout(); return; }
+                    setDeleting(true);
+                    try {
+                      const { data: sessionData } = await supabase.auth.getSession();
+                      const accessToken = sessionData?.session?.access_token;
+                      const { error } = await supabase.functions.invoke("delete-account", {
+                        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+                      });
+                      if (error) throw error;
+                      onLogout();
+                    } catch (e) {
+                      alert("Couldn't delete your account automatically right now — please try again, or contact support if it keeps failing.");
+                    }
+                    setDeleting(false);
+                  }}
+                  disabled={deleting}
+                  className="flex-1 rounded-2xl bg-rose-500 py-3 font-bold text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {deleting ? "Deleting..." : "Yes, delete"}
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         <button

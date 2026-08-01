@@ -46,8 +46,11 @@ export default function Profile({
     account_name: "",
     account_number: "",
     address: "",
+    delivery_radius_km: "5",
   });
   const [savingSeller, setSavingSeller] = useState(false);
+  const [locatingSeller, setLocatingSeller] = useState(false);
+  const [locationStatus, setLocationStatus] = useState("");
   const [showCookedModal, setShowCookedModal] = useState(false);
 
   useEffect(() => {
@@ -72,7 +75,7 @@ export default function Profile({
     if (!authUser) return;
     supabase
       .from("profiles")
-      .select("accent_color, seller_bank_name, seller_account_name, seller_account_number, seller_address")
+      .select("accent_color, seller_bank_name, seller_account_name, seller_account_number, seller_address, delivery_radius_km, seller_lat, seller_lng")
       .eq("user_id", authUser.id)
       .maybeSingle()
       .then(({ data }) => {
@@ -83,6 +86,9 @@ export default function Profile({
           account_name: data.seller_account_name || "",
           account_number: data.seller_account_number || "",
           address: data.seller_address || "",
+          delivery_radius_km: data.delivery_radius_km ? String(data.delivery_radius_km) : "5",
+          lat: data.seller_lat ?? null,
+          lng: data.seller_lng ?? null,
         });
       })
       .catch(() => {});
@@ -121,6 +127,25 @@ export default function Profile({
     }
   };
 
+  const captureSellerLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationStatus("Geolocation isn't supported on this device.");
+      return;
+    }
+    setLocatingSeller(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setSellerForm((s) => ({ ...s, lat: pos.coords.latitude, lng: pos.coords.longitude }));
+        setLocationStatus("Location captured — save to apply it to your delivery radius.");
+        setLocatingSeller(false);
+      },
+      () => {
+        setLocationStatus("Couldn't get your location — check location permission for this site.");
+        setLocatingSeller(false);
+      }
+    );
+  };
+
   const saveSellerDetails = async () => {
     if (!authUser) return;
     setSavingSeller(true);
@@ -131,6 +156,9 @@ export default function Profile({
         seller_account_name: sellerForm.account_name.trim(),
         seller_account_number: sellerForm.account_number.trim(),
         seller_address: sellerForm.address.trim(),
+        delivery_radius_km: parseFloat(sellerForm.delivery_radius_km) || 5,
+        seller_lat: sellerForm.lat ?? null,
+        seller_lng: sellerForm.lng ?? null,
       });
     } catch (e) {
       alert("Couldn't save — the profiles table may not be set up yet.");
@@ -283,6 +311,30 @@ export default function Profile({
                 placeholder="Pickup address (for buyer directions)"
                 className="w-full rounded-xl bg-black border border-white/15 p-3 text-sm"
               />
+
+              <div className="rounded-xl border border-white/10 bg-black/40 p-3">
+                <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Delivery Range</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={sellerForm.delivery_radius_km}
+                    onChange={(e) => setSellerForm((s) => ({ ...s, delivery_radius_km: e.target.value }))}
+                    className="w-20 rounded-lg bg-black border border-white/15 p-2 text-sm text-center"
+                  />
+                  <span className="text-sm text-gray-400">km radius from your location</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={captureSellerLocation}
+                  disabled={locatingSeller}
+                  className="mt-2 w-full rounded-lg border border-white/15 bg-white/5 py-2 text-xs font-bold uppercase tracking-wide text-white disabled:opacity-50"
+                >
+                  {locatingSeller ? "Locating..." : sellerForm.lat ? "Update My Location" : "Use My Current Location"}
+                </button>
+                {locationStatus && <p className="mt-2 text-xs text-gray-500">{locationStatus}</p>}
+              </div>
             </div>
             <button
               onClick={saveSellerDetails}

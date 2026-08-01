@@ -18,6 +18,74 @@
   box-sizing: border-box;
 }
 
+/* ============================================
+   Light theme — the whole app is built with
+   hardcoded dark-mode Tailwind utility classes
+   (bg-black, text-white, bg-white/5, etc.), so
+   rather than rewriting every component, this
+   scoped override flips the exact classes used
+   once `.light-theme` is on the app root. Any
+   surface that was white/light now goes black,
+   and vice versa, matching "invert the highlight
+   color" behavior requested for light mode.
+   ============================================ */
+.light-theme {
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+}
+
+.light-theme .bg-black,
+.light-theme .bg-black\/70,
+.light-theme .bg-black\/80,
+.light-theme .bg-black\/85,
+.light-theme .bg-black\/90,
+.light-theme .bg-black\/40,
+.light-theme .bg-zinc-950,
+.light-theme .bg-zinc-900,
+.light-theme .bg-zinc-900\/80,
+.light-theme .bg-slate-950,
+.light-theme .bg-neutral-900 {
+  background-color: #ffffff !important;
+}
+
+.light-theme .text-white {
+  color: #0a0a0a !important;
+}
+
+.light-theme .text-gray-400,
+.light-theme .text-gray-500 {
+  color: #4b5563 !important;
+}
+
+.light-theme .border-white\/10,
+.light-theme .border-white\/15,
+.light-theme .border-white\/20 {
+  border-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* Surfaces that were translucent white become translucent black */
+.light-theme .bg-white\/5,
+.light-theme .bg-white\/10 {
+  background-color: rgba(0, 0, 0, 0.05) !important;
+}
+
+/* "Highlighted"/active elements: previously solid white on black now
+   become solid black on white — the literal white<->black swap. */
+.light-theme .bg-white,
+.light-theme .bg-white\/90 {
+  background-color: #0a0a0a !important;
+  color: #ffffff !important;
+}
+.light-theme .bg-white .text-black,
+.light-theme .bg-white\/90 .text-black,
+.light-theme .text-black {
+  color: #ffffff !important;
+}
+
+.light-theme img {
+  filter: brightness(0.97) contrast(1.02);
+}
+
 html,
 body,
 #root {

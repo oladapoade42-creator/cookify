@@ -1,6 +1,29 @@
-import { useEffect, useState } from "react";
-import { ChefHat, Clock, Star, Flame, TrendingUp } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChefHat, Clock, Star, Flame, TrendingUp, X, Mic, ArrowRight, CheckCircle2, Loader2 } from "lucide-react";
 import { supabase } from "../supabase";
+import { pickNaturalVoice } from "../utils/voice";
+
+const GEMINI_MODEL = "gemini-2.5-flash";
+
+async function sendPromptToGemini(promptText) {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+  if (!apiKey) return null;
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] }),
+      }
+    );
+    if (!resp.ok) throw new Error("Gemini request failed");
+    const data = await resp.json();
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 const DISHES = [
   {
@@ -45,9 +68,25 @@ const DISHES = [
   },
 ];
 
+const FALLBACK_STEPS = [
+  "Gather and prep all your ingredients before you start cooking — this makes everything faster.",
+  "Heat your pan or pot and add your base ingredients (oil, aromatics, etc).",
+  "Add your main ingredients and cook until they're properly done.",
+  "Season to taste and adjust as needed.",
+  "Plate it up and serve while hot. Enjoy!",
+];
+
 export default function Learn() {
   const [ranking, setRanking] = useState([]);
-  const [rankingSource, setRankingSource] = useState("local"); // 'global' | 'local'
+  const [rankingSource, setRankingSource] = useState("local");
+
+  // AI Preview state
+  const [previewDish, setPreviewDish] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [loadingSteps, setLoadingSteps] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognitionRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +127,101 @@ export default function Learn() {
       return [];
     }
   }
+
+  const startLearning = async (dish) => {
+    setPreviewDish(dish);
+    setStepIndex(0);
+    setLoadingSteps(true);
+    setSteps([]);
+
+    const prompt = `Give a quick, beginner-friendly walkthrough for preparing "${dish.title}" in exactly 5-6 short steps. Each step should be one concise sentence, practical and easy to follow while actively cooking. Return ONLY a numbered list, one step per line, no intro or outro text.`;
+    const text = await sendPromptToGemini(prompt);
+
+    if (text) {
+      const parsed = text
+        .split("\n")
+        .map((line) => line.replace(/^\s*\d+[\).\s-]*/, "").trim())
+        .filter(Boolean);
+      setSteps(parsed.length > 0 ? parsed : FALLBACK_STEPS);
+    } else {
+      setSteps(FALLBACK_STEPS);
+    }
+    setLoadingSteps(false);
+  };
+
+  const speakStep = (text) => {
+    if (!("speechSynthesis" in window) || !text) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    const voice = pickNaturalVoice();
+    if (voice) utter.voice = voice;
+    const usingNeural = !!voice && /online \(natural\)/i.test(voice.name);
+    utter.rate = usingNeural ? 1 : 0.96;
+    utter.pitch = usingNeural ? 1 : 1.02;
+    window.speechSynthesis.speak(utter);
+  };
+
+  useEffect(() => {
+    if (previewDish && steps[stepIndex]) speakStep(steps[stepIndex]);
+  }, [stepIndex, steps, previewDish]);
+
+  const goNext = () => {
+    setStepIndex((i) => Math.min(i + 1, steps.length - 1));
+  };
+
+  const closePreview = () => {
+    window.speechSynthesis?.cancel();
+    stopListening();
+    setPreviewDish(null);
+    setSteps([]);
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch (e) {}
+      recognitionRef.current = null;
+    }
+    setListening(false);
+  };
+
+  const toggleVoiceControl = async () => {
+    if (listening) {
+      stopListening();
+      return;
+    }
+
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      alert("Microphone access is required to say \"next\" while you cook.");
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice recognition isn't supported in this browser.");
+      return;
+    }
+
+    const recog = new SpeechRecognition();
+    recog.lang = "en-US";
+    recog.continuous = true;
+    recog.interimResults = false;
+
+    recog.onresult = (ev) => {
+      const lastResult = ev.results[ev.results.length - 1];
+      const transcript = lastResult[0].transcript.toLowerCase();
+      if (transcript.includes("next")) {
+        setStepIndex((i) => Math.min(i + 1, steps.length - 1));
+      }
+    };
+    recog.onend = () => setListening(false);
+    recog.onerror = () => setListening(false);
+
+    recognitionRef.current = recog;
+    recog.start();
+    setListening(true);
+  };
 
   return (
     <div className="flex-1 bg-black p-5 overflow-y-auto text-white">
@@ -137,7 +271,10 @@ export default function Learn() {
 
             <p className="mt-4 text-sm text-gray-400 leading-6">{recipe.fact}</p>
 
-            <button className="mt-5 w-full bg-white text-black py-3 rounded-xl font-bold">
+            <button
+              onClick={() => startLearning(recipe)}
+              className="mt-5 w-full bg-white text-black py-3 rounded-xl font-bold backdrop-blur-xl"
+            >
               Start Learning
             </button>
           </div>
@@ -174,6 +311,78 @@ export default function Learn() {
           </div>
         )}
       </div>
+
+      {previewDish && (
+        <div className="fixed inset-0 z-[80] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-[440px] rounded-[28px] border border-white/10 bg-zinc-950 p-6 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <p className="text-[10px] uppercase tracking-[0.3em] text-gray-500">AI Preview</p>
+                <h3 className="text-lg font-black">{previewDish.title}</h3>
+              </div>
+              <button
+                onClick={closePreview}
+                className="rounded-full border border-white/15 bg-white/10 backdrop-blur-xl px-4 py-2 text-xs font-bold uppercase tracking-wide flex items-center gap-1.5"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" /> Done
+              </button>
+            </div>
+
+            {loadingSteps ? (
+              <div className="flex items-center justify-center py-12 text-gray-400">
+                <Loader2 className="h-5 w-5 animate-spin mr-2" /> Preparing your quick guide...
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-1.5 mb-5">
+                  {steps.map((_, i) => (
+                    <div key={i} className={`h-1.5 flex-1 rounded-full ${i <= stepIndex ? "bg-white" : "bg-white/10"}`} />
+                  ))}
+                </div>
+
+                <p className="text-[11px] uppercase tracking-[0.3em] text-gray-500 mb-2">
+                  Step {stepIndex + 1} of {steps.length}
+                </p>
+                <p className="text-lg font-bold leading-7 text-white min-h-[80px]">
+                  {steps[stepIndex]}
+                </p>
+
+                <div className="mt-6 flex gap-3">
+                  <button
+                    onClick={toggleVoiceControl}
+                    className={`rounded-2xl p-4 backdrop-blur-xl border transition ${
+                      listening ? "bg-rose-500/80 border-rose-400 text-white" : "bg-white/5 border-white/15 text-white"
+                    }`}
+                    aria-label="Voice control"
+                    title={listening ? "Listening for 'next'..." : "Say 'next' to advance"}
+                  >
+                    <Mic className="h-5 w-5" />
+                  </button>
+
+                  {stepIndex < steps.length - 1 ? (
+                    <button
+                      onClick={goNext}
+                      className="flex-1 rounded-2xl bg-white text-black py-4 font-bold uppercase tracking-wide flex items-center justify-center gap-2"
+                    >
+                      Next <ArrowRight className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={closePreview}
+                      className="flex-1 rounded-2xl bg-white text-black py-4 font-bold uppercase tracking-wide"
+                    >
+                      Finish
+                    </button>
+                  )}
+                </div>
+                {listening && (
+                  <p className="mt-3 text-center text-xs text-rose-300">Listening — say "next" to move on.</p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

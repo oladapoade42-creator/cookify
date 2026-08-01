@@ -16,6 +16,7 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
   const [incomingOrders, setIncomingOrders] = useState([]);
   const [activeListing, setActiveListing] = useState(null);
   const [sellerProfile, setSellerProfile] = useState(null);
+  const [distanceInfo, setDistanceInfo] = useState(null);
   const [showPostForm, setShowPostForm] = useState(false);
   const [posting, setPosting] = useState(false);
   const [draft, setDraft] = useState({ title: "", price: "", description: "", image: "" });
@@ -76,16 +77,40 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
 
   async function openOrderModal(listing) {
     setActiveListing(listing);
+    setDistanceInfo(null);
     try {
       const { data } = await supabase
         .from("profiles")
-        .select("display_name, seller_bank_name, seller_account_name, seller_account_number, seller_address")
+        .select("display_name, seller_bank_name, seller_account_name, seller_account_number, seller_address, delivery_radius_km, seller_lat, seller_lng")
         .eq("user_id", listing.seller_id)
         .maybeSingle();
       setSellerProfile(data);
+
+      if (data?.seller_lat && data?.seller_lng && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const distanceKm = haversineKm(pos.coords.latitude, pos.coords.longitude, data.seller_lat, data.seller_lng);
+            setDistanceInfo({
+              distanceKm: distanceKm.toFixed(1),
+              inRange: distanceKm <= (data.delivery_radius_km || 5),
+            });
+          },
+          () => setDistanceInfo(null)
+        );
+      }
     } catch (e) {
       setSellerProfile(null);
     }
+  }
+
+  function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
   }
 
   async function placeOrder() {
@@ -254,7 +279,7 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
           <div className="w-full max-w-[420px] rounded-[28px] border border-white/10 bg-zinc-950 p-6 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-black">{activeListing.title}</h3>
-              <button onClick={() => { setActiveListing(null); setNotice(""); }} className="rounded-full border border-white/10 bg-white/10 p-2">
+              <button onClick={() => { setActiveListing(null); setNotice(""); setDistanceInfo(null); }} className="rounded-full border border-white/10 bg-white/10 p-2">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -268,6 +293,16 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
               Cookify does not process or verify this payment — you're paying the seller's account
               directly. Only send money to sellers you trust, and confirm the order details before paying.
             </div>
+
+            {distanceInfo && (
+              <div className={`mt-3 rounded-2xl border p-3 text-sm text-center ${
+                distanceInfo.inRange ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200" : "border-rose-500/30 bg-rose-500/10 text-rose-200"
+              }`}>
+                {distanceInfo.inRange
+                  ? `You're ${distanceInfo.distanceKm}km away — within this seller's delivery range.`
+                  : `You're ${distanceInfo.distanceKm}km away — outside this seller's ${sellerProfile?.delivery_radius_km || 5}km delivery range.`}
+              </div>
+            )}
 
             {sellerProfile?.seller_account_number ? (
               <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm space-y-1">
