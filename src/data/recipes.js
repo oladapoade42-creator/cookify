@@ -26,7 +26,7 @@ const recipes = [
       "Add cold day-old rice, breaking up clumps, then return the chicken and egg to the wok.",
       "Season with soy sauce and sesame oil, tossing everything until evenly coated and hot.",
     ] },
-  { id: 4, title: "Coconut Rice", category: "Rice", image: "https://images.unsplash.com/photo-1596797038530-2c107229654b?w=800", time: "40 mins", difficulty: "Easy", rating: 4.6, nutrition: { calories: 390, protein: "6g", carbs: "60g", fat: "13g" },
+  { id: 4, title: "Coconut Rice", category: "Rice", image: "https://images.unsplash.com/photo-1677921755291-c39158477b8e?w=800", time: "40 mins", difficulty: "Easy", rating: 4.6, nutrition: { calories: 390, protein: "6g", carbs: "60g", fat: "13g" },
     description: "Fragrant rice cooked in coconut milk for a naturally sweet, creamy side that pairs with almost any main.",
     instructions: [
       "Rinse rice until the water runs clear.",
