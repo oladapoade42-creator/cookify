@@ -55,13 +55,29 @@ export default function App() {
       alert('Service temporarily not available at the moment.');
       return;
     }
-    const { error } = await supabase.auth.signInWithOAuth({ provider });
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      // Without this, Google silently reuses whatever Google account is
+      // still signed into the browser instead of letting the person pick
+      // a different one — this is what "shows the same account" was.
+      options: provider === 'google' ? { queryParams: { prompt: 'select_account' } } : undefined,
+    });
     if (error) {
       alert(`Login failed: ${error.message}`);
       return;
     }
     // Supabase redirects the browser through the OAuth flow — the actual
     // session gets picked up by onAuthStateChange below once it returns.
+  };
+
+  // Logging out has to end the actual Supabase session — just flipping
+  // isAuthenticated left the old session (and authUser/authProvider) alive,
+  // so logging back in just picked the same session right back up.
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setIsAuthenticated(false);
+    setAuthUser(null);
+    setAuthProvider(null);
   };
 
   // Pick up the real Supabase session after an OAuth redirect (Google/Apple),
@@ -343,7 +359,7 @@ export default function App() {
               tier={tier}
               authUser={authUser}
               authProvider={authProvider}
-              onLogout={() => setIsAuthenticated(false)}
+              onLogout={handleLogout}
               onOpenSettings={() => setActiveTab('settings')}
               onOpenFavorites={() => setActiveTab('favorites')}
               onUpgraded={upgradeToPro}
@@ -353,7 +369,7 @@ export default function App() {
             <Settings
               isPremium={isPremium}
               onBack={() => setActiveTab('profile')}
-              onLogout={() => setIsAuthenticated(false)}
+              onLogout={handleLogout}
               theme={theme}
               onToggleTheme={toggleTheme}
               authUser={authUser}
