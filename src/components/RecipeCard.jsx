@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X } from "lucide-react";
 import { supabase } from "../supabase";
 
@@ -46,6 +46,12 @@ export default function RecipeCard({
   const canComment = authProvider === "google" || authProvider === "apple";
   const canLike = authProvider === "google" || authProvider === "apple"; // guests can't like
 
+  // The same recipe can be mounted twice at once (e.g. the feed card behind
+  // the Expand detail view). Supabase errors if two instances both try to
+  // `.on()` the same channel topic, so each mounted card gets its own
+  // unique topic suffix even when they're watching the same recipeId.
+  const instanceIdRef = useRef(Math.random().toString(36).slice(2));
+
   // Load the real like count + whether this user already liked it, then
   // stay live via a Supabase realtime subscription — so the count updates
   // the moment anyone (on any device) likes/unlikes, no refresh needed.
@@ -75,7 +81,7 @@ export default function RecipeCard({
     }
 
     const channel = supabase
-      .channel(`likes-${recipeId}`)
+      .channel(`likes-${recipeId}-${instanceIdRef.current}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "likes", filter: `recipe_id=eq.${recipeId}` }, refreshCount)
       .subscribe();
 
