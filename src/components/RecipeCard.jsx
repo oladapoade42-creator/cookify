@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X } from "lucide-react";
+import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X, CirclePlay } from "lucide-react";
 import { supabase } from "../supabase";
 
 export default function RecipeCard({
@@ -367,6 +367,19 @@ export default function RecipeCard({
                   ))}
                 </ol>
               </div>
+            )}
+
+            {title && (
+              <a
+                href={`https://www.youtube.com/results?search_query=${encodeURIComponent(`${title} recipe how to cook`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(ev) => ev.stopPropagation()}
+                className="flex items-center justify-center gap-2 rounded-[20px] border border-white/10 bg-red-600/10 py-3 text-sm font-bold uppercase tracking-[0.2em] text-red-400 transition hover:bg-red-600/20"
+              >
+                <CirclePlay className="w-4 h-4" />
+                Watch on YouTube
+              </a>
             )}
           </div>
         )}

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Plus, MapPin, X, ShoppingBag, Loader2, ChefHat } from "lucide-react";
 import { supabase } from "../supabase";
+import { getUserItem } from "../utils/userStorage";
 
 const ORDER_STAGES = ["pending", "preparing", "out_for_delivery", "delivered"];
 const STAGE_LABELS = {
@@ -81,7 +82,7 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
     try {
       const { data } = await supabase
         .from("profiles")
-        .select("display_name, seller_bank_name, seller_account_name, seller_account_number, seller_address, delivery_radius_km, seller_lat, seller_lng")
+        .select("username, seller_bank_name, seller_account_name, seller_account_number, seller_address, delivery_radius_km, seller_lat, seller_lng")
         .eq("user_id", listing.seller_id)
         .maybeSingle();
       setSellerProfile(data);
@@ -152,11 +153,20 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
     if (!draft.title.trim() || !draft.price) return;
     setPosting(true);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const email = sessionData?.session?.user?.email || "";
+      // Use the seller's public username, never their email — the email
+      // shouldn't be shown to buyers on a public listing.
+      let sellerName = getUserItem(authUser, "cookify_username") || "";
+      if (!sellerName) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("username")
+          .eq("user_id", authUser.id)
+          .maybeSingle();
+        sellerName = profile?.username || "Cookify Seller";
+      }
       await supabase.from("food_listings").insert({
         seller_id: authUser.id,
-        seller_name: email,
+        seller_name: sellerName,
         title: draft.title.trim(),
         price: parseFloat(draft.price),
         description: draft.description.trim(),

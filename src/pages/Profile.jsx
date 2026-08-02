@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { supabase } from "../supabase";
 import UpgradeButton from "../components/UpgradeButton";
+import { getUserItem, setUserItem } from "../utils/userStorage";
+import { findAvailableUsername, isUsernameAvailable, nameFromAuthUser, slugifyUsername } from "../utils/username";
 
 const ACCENT_COLORS = [
   { name: "White", value: "#ffffff" },
@@ -52,54 +54,107 @@ export default function Profile({
   const [locatingSeller, setLocatingSeller] = useState(false);
   const [locationStatus, setLocationStatus] = useState("");
   const [showCookedModal, setShowCookedModal] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState(""); // transient feedback while editing
 
+  // Local (fast) load, scoped per account so switching Google accounts
+  // never shows a different person's photo/username/color.
   useEffect(() => {
-    const stored = localStorage.getItem("cookify_profile_photo");
+    setProfilePhoto(null);
+    setUsername("");
+    setAccentColor("#ffffff");
+
+    const stored = getUserItem(authUser, "cookify_profile_photo");
     if (stored) setProfilePhoto(stored);
 
-    const storedName = localStorage.getItem("cookify_username");
-    if (storedName) {
-      setUsername(storedName);
-    } else if (authUser?.email) {
-      // Default to the part of their Google email before @ — e.g.
-      // "ademola.cooks@gmail.com" -> "ademola.cooks" — still editable after.
-      const emailPrefix = authUser.email.split("@")[0];
-      setUsername(emailPrefix);
-    }
+    const storedName = getUserItem(authUser, "cookify_username");
+    if (storedName) setUsername(storedName);
 
-    const storedColor = localStorage.getItem("cookify_accent_color");
+    const storedColor = getUserItem(authUser, "cookify_accent_color");
     if (storedColor) setAccentColor(storedColor);
-  }, [authUser]);
+  }, [authUser?.id]);
 
+  // Source of truth: the `profiles` table. On first login for this account,
+  // auto-generate a unique username from their Google name (e.g. "Ade Ola"
+  // -> "ade_ola", or "ade_ola_2" if that's already taken by someone else)
+  // and save it — this is what guarantees no two people share a username.
   useEffect(() => {
     if (!authUser) return;
+    let cancelled = false;
+
     supabase
       .from("profiles")
-      .select("accent_color, seller_bank_name, seller_account_name, seller_account_number, seller_address, delivery_radius_km, seller_lat, seller_lng")
+      .select("username, accent_color, seller_bank_name, seller_account_name, seller_account_number, seller_address, delivery_radius_km, seller_lat, seller_lng")
       .eq("user_id", authUser.id)
       .maybeSingle()
-      .then(({ data }) => {
-        if (!data) return;
-        if (data.accent_color) setAccentColor(data.accent_color);
-        setSellerForm({
-          bank_name: data.seller_bank_name || "",
-          account_name: data.seller_account_name || "",
-          account_number: data.seller_account_number || "",
-          address: data.seller_address || "",
-          delivery_radius_km: data.delivery_radius_km ? String(data.delivery_radius_km) : "5",
-          lat: data.seller_lat ?? null,
-          lng: data.seller_lng ?? null,
-        });
+      .then(async ({ data }) => {
+        if (cancelled) return;
+
+        if (data?.accent_color) setAccentColor(data.accent_color);
+        if (data) {
+          setSellerForm({
+            bank_name: data.seller_bank_name || "",
+            account_name: data.seller_account_name || "",
+            account_number: data.seller_account_number || "",
+            address: data.seller_address || "",
+            delivery_radius_km: data.delivery_radius_km ? String(data.delivery_radius_km) : "5",
+            lat: data.seller_lat ?? null,
+            lng: data.seller_lng ?? null,
+          });
+        }
+
+        if (data?.username) {
+          setUsername(data.username);
+          setUserItem(authUser, "cookify_username", data.username);
+          return;
+        }
+
+        // No username on file yet for this account — generate one from
+        // their Google display name and reserve it.
+        const base = nameFromAuthUser(authUser);
+        const unique = await findAvailableUsername(supabase, base, authUser.id);
+        if (cancelled) return;
+
+        setUsername(unique);
+        setUserItem(authUser, "cookify_username", unique);
+        try {
+          await supabase.from("profiles").upsert({ user_id: authUser.id, username: unique });
+        } catch (e) {
+          // profiles table/username column may not be migrated yet —
+          // the username still works locally for this session.
+        }
       })
       .catch(() => {});
-  }, [authUser]);
 
-  const handleEditUsername = () => {
+    return () => { cancelled = true; };
+  }, [authUser?.id]);
+
+  const handleEditUsername = async () => {
     const draft = window.prompt("Choose a username:", username || "");
-    if (draft && draft.trim()) {
-      const clean = draft.trim().slice(0, 24);
-      setUsername(clean);
-      localStorage.setItem("cookify_username", clean);
+    if (!draft || !draft.trim()) return;
+
+    const clean = slugifyUsername(draft.trim());
+    if (clean === username) return;
+
+    setUsernameStatus("Checking availability...");
+    const available = authUser
+      ? await isUsernameAvailable(supabase, clean, authUser.id)
+      : true;
+
+    if (!available) {
+      setUsernameStatus(`"${clean}" is already taken — try another.`);
+      return;
+    }
+
+    setUsername(clean);
+    setUserItem(authUser, "cookify_username", clean);
+    setUsernameStatus("Username updated.");
+
+    if (authUser) {
+      try {
+        await supabase.from("profiles").upsert({ user_id: authUser.id, username: clean });
+      } catch (e) {
+        setUsernameStatus("Saved locally — couldn't sync to the server yet.");
+      }
     }
   };
 
@@ -111,7 +166,7 @@ export default function Profile({
       const result = reader.result;
       if (typeof result === "string") {
         setProfilePhoto(result);
-        localStorage.setItem("cookify_profile_photo", result);
+        setUserItem(authUser, "cookify_profile_photo", result);
       }
     };
     reader.readAsDataURL(file);
@@ -119,7 +174,7 @@ export default function Profile({
 
   const handlePickColor = async (color) => {
     setAccentColor(color);
-    localStorage.setItem("cookify_accent_color", color);
+    setUserItem(authUser, "cookify_accent_color", color);
     if (authUser) {
       try {
         await supabase.from("profiles").upsert({ user_id: authUser.id, accent_color: color });
@@ -224,6 +279,9 @@ export default function Profile({
             <p className="text-sm text-gray-400">
               {isGuest ? "Browsing as guest" : isSeller ? "Cookify Pro+ Seller" : "Cookify Creator"}
             </p>
+            {!isGuest && usernameStatus && (
+              <p className="text-xs text-gray-500 mt-1">{usernameStatus}</p>
+            )}
           </div>
 
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleUploadPhoto} />

@@ -12,6 +12,7 @@ import Favorites from './pages/Favorites';
 import Settings from './pages/Settings';
 import ERestaurant from './pages/ERestaurant';
 import UpgradeButton from './components/UpgradeButton';
+import { getUserItem, setUserItem, migrateAllLegacyKeys } from './utils/userStorage';
 import React, { useState, useEffect } from 'react';
 import {
   ChefHat,
@@ -115,9 +116,30 @@ export default function App() {
   const [tutorOpenRequest, setTutorOpenRequest] = useState(0);
   const [openListingId, setOpenListingId] = useState(null);
   const [favorites, setFavorites] = useState([]);
+  // Prevents a subtle bug: when authUser changes, this render's `favorites`
+  // closure is still the *previous* account's array until the load effect's
+  // async setFavorites takes effect. Without this guard, the save effect
+  // below would fire once with the old account's favorites and overwrite
+  // the new account's storage with them.
+  const skipNextFavoritesSaveRef = React.useRef(false);
 
+  // Keyed on authUser?.id so this reloads (with fresh, per-account data)
+  // every time someone logs in as a *different* account — not just once
+  // on mount. Always resets to defaults first so a brand-new account
+  // never briefly shows the previous account's numbers before its own
+  // (empty) data loads.
   useEffect(() => {
-    const stored = localStorage.getItem('cookify_favorites');
+    // One-time move of any pre-existing unscoped data onto this account.
+    migrateAllLegacyKeys(authUser);
+
+    skipNextFavoritesSaveRef.current = true;
+    setFavorites([]);
+    setXp(0);
+    setCookedCount(0);
+    setCookedRecipesList([]);
+    setStreak(0);
+
+    const stored = getUserItem(authUser, 'cookify_favorites');
     if (stored) {
       try {
         setFavorites(JSON.parse(stored));
@@ -127,14 +149,14 @@ export default function App() {
     }
 
     // Restore progress (XP, streak, cooked count) saved from previous sessions
-    const storedProgress = localStorage.getItem('cookify_progress');
+    const storedProgress = getUserItem(authUser, 'cookify_progress');
     if (storedProgress) {
       try {
         const progress = JSON.parse(storedProgress);
         setXp(progress.xp ?? 0);
         setCookedCount(progress.cookedCount ?? 0);
 
-        const storedList = localStorage.getItem('cookify_cooked_list');
+        const storedList = getUserItem(authUser, 'cookify_cooked_list');
         if (storedList) {
           try { setCookedRecipesList(JSON.parse(storedList)); } catch (e) {}
         }
@@ -155,11 +177,15 @@ export default function App() {
         // ignore corrupted data
       }
     }
-  }, []);
+  }, [authUser?.id]);
 
   useEffect(() => {
-    localStorage.setItem('cookify_favorites', JSON.stringify(favorites));
-  }, [favorites]);
+    if (skipNextFavoritesSaveRef.current) {
+      skipNextFavoritesSaveRef.current = false;
+      return;
+    }
+    setUserItem(authUser, 'cookify_favorites', JSON.stringify(favorites));
+  }, [favorites, authUser?.id]);
 
   const upgradeToPro = (newTier = 'pro') => {
     setIsPremium(true);
@@ -168,6 +194,8 @@ export default function App() {
 
   // Real Pro status comes from the subscriptions table, not a local click.
   useEffect(() => {
+    setIsPremium(false);
+    setTier(null);
     if (!authUser) return;
     supabase
       .from('subscriptions')
@@ -181,11 +209,11 @@ export default function App() {
         }
       })
       .catch(() => {}); // subscriptions table not set up yet
-  }, [authUser]);
+  }, [authUser?.id]);
 
   const persistProgress = (partial) => {
-    const existing = JSON.parse(localStorage.getItem('cookify_progress') || '{}');
-    localStorage.setItem('cookify_progress', JSON.stringify({ ...existing, ...partial }));
+    const existing = JSON.parse(getUserItem(authUser, 'cookify_progress') || '{}');
+    setUserItem(authUser, 'cookify_progress', JSON.stringify({ ...existing, ...partial }));
   };
 
   // Called whenever the AI tutor is activated for a recipe.
@@ -203,7 +231,7 @@ export default function App() {
         { id: recipe.id, title: recipe.title || recipe.name, image: recipe.image, cookedAt: new Date().toISOString() },
         ...withoutDupe,
       ];
-      localStorage.setItem('cookify_cooked_list', JSON.stringify(next));
+      setUserItem(authUser, 'cookify_cooked_list', JSON.stringify(next));
       setCookedCount(next.length);
       persistProgress({ cookedCount: next.length });
       return next;
@@ -217,7 +245,7 @@ export default function App() {
       return next;
     });
     setStreak((prev) => {
-      const stored = JSON.parse(localStorage.getItem('cookify_progress') || '{}');
+      const stored = JSON.parse(getUserItem(authUser, 'cookify_progress') || '{}');
       const lastActive = stored.lastActiveDate;
       const next = lastActive === today ? prev : prev + 1;
       persistProgress({ streak: next, lastActiveDate: today });
@@ -229,13 +257,13 @@ export default function App() {
   // Each correct answer is worth +20 XP; the streak bumps once per day on
   // the first slot answered (right or wrong still counts as engagement).
   const today = new Date().toDateString();
-  const storedProgress = JSON.parse(localStorage.getItem('cookify_progress') || '{}');
+  const storedProgress = JSON.parse(getUserItem(authUser, 'cookify_progress') || '{}');
   const dailyAnswers = storedProgress.dailyChallengeDate === today ? (storedProgress.dailyChallengeAnswers || {}) : {};
   const dailyChallengeDone = ['breakfast', 'lunch', 'dinner'].every((slot) => dailyAnswers[slot] !== undefined);
 
   const handleAnswerChallenge = (slot, wasCorrect) => {
     const now = new Date().toDateString();
-    const stored = JSON.parse(localStorage.getItem('cookify_progress') || '{}');
+    const stored = JSON.parse(getUserItem(authUser, 'cookify_progress') || '{}');
     const answersToday = stored.dailyChallengeDate === now ? (stored.dailyChallengeAnswers || {}) : {};
     if (answersToday[slot] !== undefined) return; // already answered this slot today
 
