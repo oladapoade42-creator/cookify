@@ -6,6 +6,7 @@ import { supabase } from "../supabase";
 import { pickNaturalVoice, stopSpeaking } from "../utils/voice";
 import { getDailyTrivia } from "../utils/dailyTrivia";
 import AdSlot from "../components/AdSlot";
+import { downloadTextPdf } from "../utils/pdf";
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
@@ -135,6 +136,16 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   const [loadingHistory, setLoadingHistory] = useState(false);
   const searchTimeoutRef = useRef(null);
   const [weeklyViews, setWeeklyViews] = useState({});
+  // Live, cross-user view counts from the shared `dish_stats` table —
+  // this is what actually makes the feed counter "live" instead of only
+  // reflecting this one browser's own scrolling history (which is what
+  // weeklyViews tracks, and why the count looked stuck near zero for a
+  // single person testing the app).
+  const [globalViews, setGlobalViews] = useState({});
+  // Tracks which recipe ids have already counted a view this session, so
+  // scrolling back and forth over the same feed card doesn't inflate the
+  // count every time it re-enters the viewport.
+  const viewedThisSessionRef = useRef(new Set());
   // AI Tutor state
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorMessages, setTutorMessages] = useState([]); // {role:'user'|'assistant', text}
@@ -168,6 +179,24 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     const weekKey = getWeekKey();
     const saved = JSON.parse(localStorage.getItem(`cookify_weekly_views_${weekKey}`) || "{}");
     setWeeklyViews(saved);
+
+    // Pull the current shared view count for every local dish so the feed
+    // shows real, everyone's-views numbers from the moment it loads,
+    // rather than starting every card at 0 until this browser views it.
+    const names = recipes.map((r) => r.title).filter(Boolean);
+    if (names.length > 0) {
+      supabase
+        .from("dish_stats")
+        .select("dish_name, view_count")
+        .in("dish_name", names)
+        .then(({ data, error }) => {
+          if (error || !data) return;
+          const map = {};
+          data.forEach((row) => { map[row.dish_name] = row.view_count; });
+          setGlobalViews(map);
+        })
+        .catch(() => {}); // dish_stats table not set up yet
+    }
 
     return () => {
       stopCamera();
@@ -254,9 +283,12 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   const allRecipesWithStats = useMemo(() => {
     return recipes.map((recipe) => ({
       ...recipe,
-      weeklyViews: weeklyViews[recipe.id] || 0,
+      // Live count from everyone, falling back to this browser's own
+      // count for the moment before the global fetch resolves (or if
+      // the dish_stats table isn't set up yet).
+      weeklyViews: globalViews[recipe.title] ?? weeklyViews[recipe.id] ?? 0,
     }));
-  }, [weeklyViews]);
+  }, [weeklyViews, globalViews]);
 
   const sortedRecipes = useMemo(() => {
     const visible = allRecipesWithStats.filter((r) => !dismissedIds.includes(r.id));
@@ -269,18 +301,38 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     });
   }, [allRecipesWithStats, dismissedIds, activeCategory, weekSeed]);
 
+  // Counts one view for a dish — used when it's opened from search, when
+  // its feed card scrolls into view, and when its detail is expanded.
+  // Each recipe only counts once per browser session (see
+  // viewedThisSessionRef) so it climbs steadily instead of jumping
+  // around as people scroll past the same card repeatedly.
+  const registerView = (recipe) => {
+    if (!recipe || viewedThisSessionRef.current.has(recipe.id)) return;
+    viewedThisSessionRef.current.add(recipe.id);
+
+    const weekKey = getWeekKey();
+    setWeeklyViews((prev) => {
+      const next = { ...prev, [recipe.id]: (prev[recipe.id] || 0) + 1 };
+      localStorage.setItem(`cookify_weekly_views_${weekKey}`, JSON.stringify(next));
+      return next;
+    });
+
+    // Bump the shared count immediately in local state so the number on
+    // screen moves the instant this dish is viewed, instead of waiting on
+    // the round trip to Supabase.
+    const dishName = recipe.title || recipe.name;
+    if (dishName) {
+      setGlobalViews((prev) => ({ ...prev, [dishName]: (prev[dishName] || 0) + 1 }));
+    }
+
+    recordGlobalDishView(recipe);
+  };
+
   const handleSelectMeal = (meal) => {
     setSelectedMeal(meal);
     setSearchQuery(meal.name);
     setSuggestions([]);
-    const weekKey = getWeekKey();
-    const nextViews = {
-      ...weeklyViews,
-      [meal.id]: (weeklyViews[meal.id] || 0) + 1,
-    };
-    setWeeklyViews(nextViews);
-    localStorage.setItem(`cookify_weekly_views_${weekKey}`, JSON.stringify(nextViews));
-    recordGlobalDishView(meal);
+    registerView(meal);
     fetchDishHistory(meal);
     fetchMealNutrition(meal);
   };
@@ -307,25 +359,30 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     }
   };
 
-  // Best-effort global view counter for the "Top Dishes" ranking (Learn tab).
-  // Requires a `dish_stats` table in Supabase — silently no-ops if it's missing.
+  // Live, cross-user view counter (also powers the "Top Dishes" ranking on
+  // the Learn tab). Requires a `dish_stats` table in Supabase — silently
+  // no-ops if it's missing. Local recipes use `.title`; dishes found via
+  // search (TheMealDB) use `.name` — this covers both so feed views
+  // actually get recorded instead of writing a blank dish_name.
   const recordGlobalDishView = async (meal) => {
+    const dishName = meal?.title || meal?.name;
+    if (!dishName) return;
     try {
       const { data } = await supabase
         .from('dish_stats')
         .select('view_count')
-        .eq('dish_name', meal.name)
+        .eq('dish_name', dishName)
         .maybeSingle();
 
       if (data) {
         await supabase
           .from('dish_stats')
           .update({ view_count: data.view_count + 1 })
-          .eq('dish_name', meal.name);
+          .eq('dish_name', dishName);
       } else {
         await supabase
           .from('dish_stats')
-          .insert({ dish_name: meal.name, image: meal.image, view_count: 1 });
+          .insert({ dish_name: dishName, image: meal.image, view_count: 1 });
       }
     } catch (e) {
       // Table not set up yet — ranking will just use local data instead.
@@ -478,11 +535,20 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     }
   };
 
-  const openScanner = async () => {
+  // Tapping the "Scan Food" tile only opens the modal — it does NOT touch
+  // the camera. The camera only turns on when the person presses the
+  // in-modal "Open camera" button (openScanner), so nothing runs before
+  // they've actually asked for it.
+  const openScannerModal = () => {
     setIsScannerOpen(true);
     setScanError("");
     setScanResult(null);
     setCameraReady(false);
+  };
+
+  const openScanner = async () => {
+    setScanError("");
+    setScanResult(null);
 
     if (streamRef.current) {
       setCameraReady(true);
@@ -547,7 +613,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     <div className="min-h-screen bg-black text-white rounded-3xl p-6 mb-6">
       {isScannerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
-          <div className="w-full max-w-[430px] rounded-[32px] border border-white/10 bg-zinc-950 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
+          <div className="w-full max-w-[430px] max-h-[92vh] overflow-y-auto rounded-[32px] border border-white/10 bg-zinc-950 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.4)]">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.3em] text-gray-400">Food scanner</p>
@@ -599,6 +665,14 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
               <div className="mt-4 rounded-[20px] border border-white/10 bg-zinc-900/80 p-4">
                 <p className="text-[10px] uppercase tracking-[0.3em] text-gray-400">{scanResult.title}</p>
                 <p className="mt-2 text-sm leading-6 text-white whitespace-pre-wrap">{scanResult.body}</p>
+                {scanMode === "dietplan" && (
+                  <button
+                    onClick={() => downloadTextPdf("cookify-diet-plan", "Your Cookify Diet Plan", scanResult.body)}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-[18px] border border-white/15 bg-white/5 py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-white transition hover:bg-white/10"
+                  >
+                    Download as PDF
+                  </button>
+                )}
               </div>
             )}
 
@@ -723,8 +797,9 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
                   onClick={() => openTutorForMeal(recipe)}
                   onCookNow={() => openTutorForMeal(recipe)}
                   onSaveRecipe={() => onSaveRecipe?.(recipe)}
-                  onExpand={() => setExpandedRecipe(recipe)}
+                  onExpand={() => { setExpandedRecipe(recipe); registerView(recipe); }}
                   onNotInterested={() => dismissRecipe(recipe.id)}
+                  onView={() => registerView(recipe)}
                 />
                 {(i + 1) % 4 === 0 && <AdSlot tier={tier} />}
               </div>
@@ -793,7 +868,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
             time="—"
             difficulty={selectedMeal.category || "—"}
             rating={4.8}
-            weeklyViews={weeklyViews[selectedMeal.id] || 0}
+            weeklyViews={globalViews[selectedMeal.name] ?? weeklyViews[selectedMeal.id] ?? 0}
             nutrition={mealNutrition}
             description={dishHistory || undefined}
             instructions={selectedMeal.instructions}
@@ -809,7 +884,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
               time: "—",
               difficulty: selectedMeal.category || "—",
               rating: 4.8,
-              weeklyViews: weeklyViews[selectedMeal.id] || 0,
+              weeklyViews: globalViews[selectedMeal.name] ?? weeklyViews[selectedMeal.id] ?? 0,
               nutrition: mealNutrition,
               description: dishHistory || undefined,
               instructions: selectedMeal.instructions,
@@ -830,7 +905,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
 
       {tutorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4">
-          <div className="w-full max-w-[700px] max-h-[92vh] overflow-y-auto rounded-[20px] border border-white/10 bg-zinc-950 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.5)]">
+          <div className="w-full max-w-[430px] max-h-[92vh] overflow-y-auto rounded-[20px] border border-white/10 bg-zinc-950 p-4 shadow-[0_20px_80px_rgba(0,0,0,0.5)]">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div className="min-w-0">
                 <p className="text-xs uppercase tracking-[0.3em] text-gray-400">AI Cooking Tutor</p>
@@ -932,7 +1007,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
         </button>
 
         <button
-          onClick={openScanner}
+          onClick={openScannerModal}
           className="bg-white/5 backdrop-blur-xl rounded-[24px] p-6 border border-white/10"
         >
           <Camera className="mx-auto mb-3" />

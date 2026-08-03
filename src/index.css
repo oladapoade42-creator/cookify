@@ -28,44 +28,73 @@
    surface that was white/light now goes black,
    and vice versa, matching "invert the highlight
    color" behavior requested for light mode.
+
+   These use *attribute* selectors (e.g.
+   [class^="bg-black"]) instead of exact class
+   selectors (.bg-black\/95) on purpose: Tailwind
+   treats every opacity suffix (bg-black/60,
+   bg-black/95, bg-zinc-950/80, ...) as its own
+   class, so an exact-match list silently misses
+   any variant that isn't enumerated — which is
+   exactly why some surfaces (the sticky feed
+   header, some card headers, stat tiles) stayed
+   dark in light mode before. A prefix match
+   catches every opacity variant automatically,
+   including ones added later.
+
+   Each rule below is written as a *pair* —
+   [class^="X"] (class list starts with X) and
+   [class*=" X"] (X appears after a space, i.e.
+   as its own token later in the list) — instead
+   of a plain [class*="X"] substring match. A
+   plain substring match would also fire on
+   "hover:X" or "focus:X" (which contain "X" as a
+   substring but should only apply on hover/focus),
+   permanently applying what's meant to be a hover
+   effect. Requiring a space or start-of-string
+   before X excludes those colon-prefixed variants.
    ============================================ */
 .light-theme {
   background: #ffffff !important;
   color: #0a0a0a !important;
 }
 
-.light-theme .bg-black,
-.light-theme .bg-black\/70,
-.light-theme .bg-black\/80,
-.light-theme .bg-black\/85,
-.light-theme .bg-black\/90,
-.light-theme .bg-black\/40,
-.light-theme .bg-zinc-950,
-.light-theme .bg-zinc-900,
-.light-theme .bg-zinc-900\/80,
-.light-theme .bg-slate-950,
-.light-theme .bg-neutral-900 {
+/* Neutral dark surfaces (black/zinc/neutral, any opacity) -> white */
+.light-theme [class^="bg-black"], .light-theme [class*=" bg-black"],
+.light-theme [class^="bg-zinc-8"], .light-theme [class*=" bg-zinc-8"],
+.light-theme [class^="bg-zinc-9"], .light-theme [class*=" bg-zinc-9"],
+.light-theme [class^="bg-neutral-9"], .light-theme [class*=" bg-neutral-9"] {
   background-color: #ffffff !important;
 }
 
-.light-theme .text-white {
+/* Slate surfaces (search bar, recipe menus, cards) have a cool/navy tint
+   and stayed that way in light mode even though the text on top of them
+   switches to dark — making them illegible. Requested behavior: these
+   turn light blue in light mode instead of white, so they still read as
+   distinct "tabs"/surfaces. */
+.light-theme [class^="bg-slate-9"], .light-theme [class*=" bg-slate-9"] {
+  background-color: #dbeafe !important;
+  border-color: rgba(30, 64, 175, 0.15) !important;
+}
+
+.light-theme [class^="text-white"], .light-theme [class*=" text-white"] {
   color: #0a0a0a !important;
 }
 
-.light-theme .text-gray-400,
-.light-theme .text-gray-500 {
+.light-theme [class^="text-gray-4"], .light-theme [class*=" text-gray-4"],
+.light-theme [class^="text-gray-5"], .light-theme [class*=" text-gray-5"] {
   color: #4b5563 !important;
 }
 
-.light-theme .border-white\/10,
-.light-theme .border-white\/15,
-.light-theme .border-white\/20 {
+.light-theme [class^="border-white/"], .light-theme [class*=" border-white/"] {
   border-color: rgba(0, 0, 0, 0.12) !important;
 }
 
-/* Surfaces that were translucent white become translucent black */
-.light-theme .bg-white\/5,
-.light-theme .bg-white\/10 {
+/* Surfaces that were translucent white become translucent black. Comes
+   before the solid bg-white/bg-white/90 rule below on purpose — both use
+   !important, so later-in-source wins where an element could match both,
+   and we want the solid swap (next rule) to take priority over this. */
+.light-theme [class^="bg-white/"], .light-theme [class*=" bg-white/"] {
   background-color: rgba(0, 0, 0, 0.05) !important;
 }
 

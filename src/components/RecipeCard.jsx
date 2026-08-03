@@ -17,6 +17,7 @@ export default function RecipeCard({
   authUser = null,
   onExpand,
   onNotInterested,
+  onView,
   nutrition = null, // { calories, protein, carbs, fat }
   description = null, // short blurb about the dish, shown in the expanded detail view
   instructions = null, // string or array of prep steps, shown in the expanded detail view
@@ -32,6 +33,31 @@ export default function RecipeCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [postingComment, setPostingComment] = useState(false);
+  const cardRootRef = useRef(null);
+
+  // Fires onView once, the first time this card is genuinely visible on
+  // screen (not just mounted off-screen in a long feed) — this is what
+  // makes the view counter climb as people actually scroll past a dish,
+  // instead of staying at zero until they tap into it.
+  useEffect(() => {
+    if (!onView || !cardRootRef.current) return;
+    let fired = false;
+    const node = cardRootRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && !fired) {
+            fired = true;
+            onView();
+            observer.disconnect();
+          }
+        }
+      },
+      { threshold: 0.4 }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [onView]);
 
   // Prep instructions can arrive as a clean array (local recipes) or as one
   // raw block of text with its own line breaks (dishes pulled from search).
@@ -226,7 +252,7 @@ export default function RecipeCard({
   };
 
   return (
-    <div className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/90 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
+    <div ref={cardRootRef} className="overflow-hidden rounded-[32px] border border-white/10 bg-slate-950/90 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
       <div className="flex items-center justify-between gap-3 p-4">
         <div className="flex items-center gap-3">
           <div className="h-12 w-12 rounded-full border border-white/10 bg-white/10 grid place-items-center text-white">
