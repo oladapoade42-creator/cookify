@@ -551,6 +551,9 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     setScanResult(null);
 
     if (streamRef.current) {
+      // Stream already exists (e.g. modal was closed and reopened) — the
+      // effect below will (re)attach it to the video element once it's
+      // mounted, so just flip cameraReady on.
       setCameraReady(true);
       return;
     }
@@ -561,23 +564,37 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     }
 
     try {
+      // This is the actual browser permission prompt — the phone/browser
+      // shows its native "Allow Cookify to use your camera?" dialog the
+      // first time this runs (or every time, if the site is set to always
+      // ask). Nothing else in this file requests camera access.
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
         audio: false,
       });
 
       streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-
+      // Don't attach to videoRef.current here — the <video> element is
+      // only rendered once cameraReady is true (see the JSX below), so at
+      // this exact moment it doesn't exist in the DOM yet and
+      // videoRef.current is still null. Setting cameraReady triggers the
+      // effect below to attach the stream right after React mounts the
+      // video element, instead of silently doing nothing here (which is
+      // why the preview looked blank — permission was actually being
+      // granted, the video tag just never received the stream).
       setCameraReady(true);
     } catch (error) {
       setScanError("Camera access was blocked. Please allow camera permission for food scans.");
     }
   };
+
+  // Attaches the active camera stream to the <video> element once it
+  // exists in the DOM (i.e. right after cameraReady flips to true).
+  useEffect(() => {
+    if (!cameraReady || !streamRef.current || !videoRef.current) return;
+    videoRef.current.srcObject = streamRef.current;
+    videoRef.current.play().catch(() => {});
+  }, [cameraReady]);
 
   const captureAndAnalyze = async () => {
     if (!videoRef.current) return;
