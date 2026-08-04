@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Bell, Moon, Sun, LogOut, Crown, ChevronRight, Trash2, Loader2, Phone, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Bell, Moon, Sun, LogOut, Crown, ChevronRight, Trash2, Loader2 } from "lucide-react";
 import { supabase } from "../supabase";
 
 export default function Settings({ isPremium = false, onBack = () => {}, onLogout = () => {}, theme = "dark", onToggleTheme = () => {}, authUser = null }) {
@@ -10,63 +10,6 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
   );
   const [notifStatus, setNotifStatus] = useState("");
   const [soundEffects, setSoundEffects] = useState(true);
-
-  // Phone verification
-  const [phone, setPhone] = useState("");
-  const [phoneVerified, setPhoneVerified] = useState(false);
-  const [otpStage, setOtpStage] = useState("idle"); // 'idle' | 'sending' | 'sent' | 'verifying'
-  const [otpCode, setOtpCode] = useState("");
-  const [phoneStatus, setPhoneStatus] = useState("");
-
-  useEffect(() => {
-    if (!authUser) return;
-    supabase.auth.getUser().then(({ data }) => {
-      const u = data?.user;
-      if (!u) return;
-      if (u.phone) setPhone(u.phone);
-      setPhoneVerified(!!u.phone_confirmed_at);
-    });
-  }, [authUser?.id]);
-
-  const sendPhoneCode = async () => {
-    const cleaned = phone.trim();
-    if (!cleaned) {
-      setPhoneStatus("Enter your number with country code, e.g. +14155551234.");
-      return;
-    }
-    setOtpStage("sending");
-    setPhoneStatus("");
-    // Links this phone number to the already-signed-in account and
-    // triggers Supabase to text a verification code to it.
-    const { error } = await supabase.auth.updateUser({ phone: cleaned });
-    if (error) {
-      setPhoneStatus(error.message || "Couldn't send a code — check the number and try again.");
-      setOtpStage("idle");
-      return;
-    }
-    setOtpStage("sent");
-    setPhoneStatus("Code sent — enter it below.");
-  };
-
-  const verifyPhoneCode = async () => {
-    if (!otpCode.trim()) return;
-    setOtpStage("verifying");
-    setPhoneStatus("");
-    const { error } = await supabase.auth.verifyOtp({
-      phone: phone.trim(),
-      token: otpCode.trim(),
-      type: "phone_change",
-    });
-    if (error) {
-      setPhoneStatus(error.message || "That code didn't match — check it and try again.");
-      setOtpStage("sent");
-      return;
-    }
-    setPhoneVerified(true);
-    setOtpStage("idle");
-    setOtpCode("");
-    setPhoneStatus("Phone number verified.");
-  };
 
   const toggleNotifications = async () => {
     if (typeof Notification === "undefined") {
@@ -163,75 +106,6 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
             </button>
           </div>
         </section>
-
-        {authUser && (
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-            <div className="flex items-center gap-3 mb-3">
-              {phoneVerified ? <ShieldCheck className="h-5 w-5 text-emerald-400" /> : <Phone className="h-5 w-5 text-white/80" />}
-              <div>
-                <p className="font-medium">Phone Verification</p>
-                <p className="text-sm text-gray-400">
-                  {phoneVerified ? `Verified — ${phone}` : "Verify your number for account security"}
-                </p>
-              </div>
-            </div>
-
-            {!phoneVerified && (
-              <div className="space-y-2">
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+14155551234"
-                  disabled={otpStage === "sent" || otpStage === "verifying"}
-                  className="w-full rounded-2xl border border-white/10 bg-black/40 p-3 text-white placeholder-gray-500 outline-none disabled:opacity-50"
-                />
-
-                {otpStage !== "sent" && otpStage !== "verifying" && (
-                  <button
-                    onClick={sendPhoneCode}
-                    disabled={otpStage === "sending"}
-                    className="w-full rounded-2xl bg-white py-3 font-bold text-black disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {otpStage === "sending" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    {otpStage === "sending" ? "Sending code..." : "Send verification code"}
-                  </button>
-                )}
-
-                {(otpStage === "sent" || otpStage === "verifying") && (
-                  <div className="space-y-2">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value)}
-                      placeholder="6-digit code"
-                      className="w-full rounded-2xl border border-white/10 bg-black/40 p-3 text-white placeholder-gray-500 outline-none"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => { setOtpStage("idle"); setOtpCode(""); setPhoneStatus(""); }}
-                        className="flex-1 rounded-2xl border border-white/15 bg-white/5 py-3 font-bold text-white"
-                      >
-                        Change number
-                      </button>
-                      <button
-                        onClick={verifyPhoneCode}
-                        disabled={otpStage === "verifying"}
-                        className="flex-1 rounded-2xl bg-white py-3 font-bold text-black disabled:opacity-50 flex items-center justify-center gap-2"
-                      >
-                        {otpStage === "verifying" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        {otpStage === "verifying" ? "Verifying..." : "Verify"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {phoneStatus && <p className="text-xs text-gray-500">{phoneStatus}</p>}
-              </div>
-            )}
-          </section>
-        )}
 
         <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">

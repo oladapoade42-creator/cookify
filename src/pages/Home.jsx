@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import recipes from "../data/recipes";
 import RecipeCard from "../components/RecipeCard";
-import { Flame, Star, ChefHat, Camera, Loader2, X, ScanLine, ArrowLeft, MoreHorizontal, Volume2, Square, Mic } from "lucide-react";
+import { Flame, Star, ChefHat, Camera, Loader2, X, ScanLine, ArrowLeft, MoreHorizontal, Volume2, Square, Mic, Image as ImageIcon } from "lucide-react";
 import { supabase } from "../supabase";
 import { pickNaturalVoice, stopSpeaking } from "../utils/voice";
 import { getDailyTrivia } from "../utils/dailyTrivia";
@@ -596,6 +596,57 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     videoRef.current.play().catch(() => {});
   }, [cameraReady]);
 
+  const galleryInputRef = useRef(null);
+
+  // Resizes/compresses a picked photo to a reasonable JPEG before sending
+  // it to Gemini — keeps uploads fast and consistent whether the photo
+  // came from the live camera or the person's own gallery.
+  const fileToJpegBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Could not read that file."));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error("That file doesn't look like a photo."));
+        img.onload = () => {
+          const maxDim = 1280;
+          const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+          const canvas = canvasRef.current || document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.9).split(",")[1]);
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+  const handleGallerySelect = async (event) => {
+    const file = event.target.files?.[0];
+    // Reset so picking the same file again still fires onChange next time.
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setScanError("Please choose a photo (JPG, PNG, etc.).");
+      return;
+    }
+
+    setScanError("");
+    setScanResult(null);
+    setIsLoadingScan(true);
+    try {
+      const base64 = await fileToJpegBase64(file);
+      const analysis = await analyzeFoodImage(base64, scanMode);
+      setScanResult(analysis);
+    } catch (e) {
+      setScanError(e.message || "Couldn't read that photo — please try another.");
+    }
+    setIsLoadingScan(false);
+  };
+
   const captureAndAnalyze = async () => {
     if (!videoRef.current) return;
 
@@ -667,14 +718,21 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
                 <video ref={videoRef} autoPlay playsInline muted className="h-[280px] w-full object-cover" />
               ) : (
                 <div className="flex h-[280px] items-center justify-center bg-zinc-950 p-6 text-center text-sm text-gray-400">
-                  {scanMode === "calories" && "Point the camera at your meal to estimate calories and macros."}
-                  {scanMode === "dietplan" && "Point the camera at your meal to get diet plan suggestions."}
-                  {scanMode === "ingredients" && "Point the camera at your ingredients to get a recipe idea."}
+                  {scanMode === "calories" && "Point the camera at your meal, or upload a photo from your gallery, to estimate calories and macros."}
+                  {scanMode === "dietplan" && "Point the camera at your meal, or upload a photo from your gallery, to get diet plan suggestions."}
+                  {scanMode === "ingredients" && "Point the camera at your ingredients, or upload a photo from your gallery, to get a recipe idea."}
                 </div>
               )}
             </div>
 
             <canvas ref={canvasRef} className="hidden" />
+            <input
+              ref={galleryInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleGallerySelect}
+              className="hidden"
+            />
 
             {scanError && <p className="mt-3 text-sm text-red-400">{scanError}</p>}
 
@@ -693,19 +751,30 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
               </div>
             )}
 
-            <button
-              onClick={cameraReady ? captureAndAnalyze : openScanner}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[24px] bg-white px-4 py-3 font-semibold text-black shadow-[0_8px_24px_rgba(255,255,255,0.08)]"
-            >
-              {isLoadingScan ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : cameraReady ? (
-                <ScanLine className="h-5 w-5" />
-              ) : (
-                <Camera className="h-5 w-5" />
-              )}
-              {isLoadingScan ? "Scanning food..." : cameraReady ? "Capture food" : "Open camera"}
-            </button>
+            <div className="mt-4 flex gap-2">
+              <button
+                onClick={cameraReady ? captureAndAnalyze : openScanner}
+                disabled={isLoadingScan}
+                className="flex flex-1 items-center justify-center gap-2 rounded-[24px] bg-white px-4 py-3 font-semibold text-black shadow-[0_8px_24px_rgba(255,255,255,0.08)] disabled:opacity-60"
+              >
+                {isLoadingScan ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : cameraReady ? (
+                  <ScanLine className="h-5 w-5" />
+                ) : (
+                  <Camera className="h-5 w-5" />
+                )}
+                {isLoadingScan ? "Scanning..." : cameraReady ? "Capture food" : "Open camera"}
+              </button>
+              <button
+                onClick={() => galleryInputRef.current?.click()}
+                disabled={isLoadingScan}
+                className="flex items-center justify-center gap-2 rounded-[24px] border border-white/15 bg-white/5 px-4 py-3 font-semibold text-white transition hover:bg-white/10 disabled:opacity-60"
+                title="Upload a photo from your gallery"
+              >
+                <ImageIcon className="h-5 w-5" />
+              </button>
+            </div>
           </div>
         </div>
       )}

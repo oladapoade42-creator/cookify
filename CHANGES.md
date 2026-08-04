@@ -1,27 +1,24 @@
-# Cookify fix — blank camera preview
+# Cookify — gallery upload for Scan Food
 
-1 file changed: `src/pages/Home.jsx` (overwrite at the same path).
+1 file: `src/pages/Home.jsx` (overwrite at the same path).
 
-## What was actually wrong
+## What changed
 
-Not a permissions problem — the browser *was* prompting for and getting
-camera access. The bug was a React timing issue in the Scan Food modal:
+The Scan Food modal now has a second button next to "Open camera" — a
+small photo icon that opens your device's native file/photo picker
+(`<input type="file" accept="image/*">`, no `capture` attribute set on
+purpose, so the OS picker offers gallery/Photos as well as camera,
+letting the person choose either).
 
-- The `<video>` element only renders once `cameraReady` is `true`.
-- The old code called `getUserMedia()`, then tried to attach the
-  resulting stream to `videoRef.current` — but at that exact moment
-  `cameraReady` was still `false`, so the `<video>` tag didn't exist in
-  the DOM yet and `videoRef.current` was `null`. The attach silently did
-  nothing, then `setCameraReady(true)` ran afterward and mounted a *new*
-  video element that never got the stream — hence "open camera" working
-  (permission granted) but the preview staying blank.
+This works the exact same way across all three modes — Calories, Diet
+Plan, and Ingredients — since they all share this one modal. So this one
+change covers the "snap food and paste it on Snap Food" request and the
+"diet plan" request together: whichever mode is selected when they pick
+a photo, it gets analyzed the same way a live camera capture would.
 
-Fixed by separating "get the stream" from "attach the stream to the
-video tag": `openScanner` now just sets `cameraReady`, and a
-`useEffect` that runs after that state change (i.e. after the video
-element is actually in the DOM) does the attaching. This also fixes the
-same issue if the modal is closed and reopened while a stream is still
-active.
+Picked photos are resized down to a max of 1280px and compressed to
+JPEG client-side before being sent off for analysis — same treatment as
+a camera capture gets, so a giant phone photo doesn't slow things down
+or blow past any size limits.
 
-No dashboard/account setup needed for this one — pure code fix. Just
-copy the file in and rebuild.
+No account/dashboard setup needed — pure code change, ready to drop in.
