@@ -13,7 +13,7 @@ const TIER_CONFIG = {
     planEnvKey: "VITE_FLW_PLAN_ID_PRO",
   },
   pro_plus: {
-    amount: 20,
+    amount: 4,
     label: "Cookify Pro+ • $4/mo",
     activeLabel: "Cookify Pro+ Active",
     title: "Cookify Pro+",

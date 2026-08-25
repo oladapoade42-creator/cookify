@@ -13,7 +13,7 @@ const FLW_WEBHOOK_SECRET = Deno.env.get("FLW_WEBHOOK_SECRET")!; // the "secret h
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   const signature = req.headers.get("verif-hash");
   if (!signature || signature !== FLW_WEBHOOK_SECRET) {
     return new Response("Unauthorized", { status: 401 });
