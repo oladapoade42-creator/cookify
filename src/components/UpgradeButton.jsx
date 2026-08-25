@@ -14,10 +14,10 @@ const TIER_CONFIG = {
   },
   pro_plus: {
     amount: 20,
-    label: "Cookify Pro+ • $20/mo",
+    label: "Cookify Pro+ • $4/mo",
     activeLabel: "Cookify Pro+ Active",
     title: "Cookify Pro+",
-    description: "Unlimited AI Chef + sell food on E-Restaurant — $20/month",
+    description: "Unlimited AI Chef + sell food on E-Restaurant — $4/month",
     planEnvKey: "VITE_FLW_PLAN_ID_PRO_PLUS",
   },
 };

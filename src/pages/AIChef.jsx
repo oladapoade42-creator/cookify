@@ -28,7 +28,7 @@ export default function AI({ callGeminiApi, isPremium, tier, authUser, onUpgrade
 
   useEffect(() => setAskCount(getTodayAskCount()), []);
 
-  // Free = 3/day. Pro ($2) = 25/day. Pro+ ($20) = unlimited.
+  // Free = 3/day. Pro ($2) = 25/day. Pro+ ($4) = unlimited.
   const DAILY_LIMIT = tier === "pro_plus" ? Infinity : tier === "pro" ? 25 : 3;
   const limitReached = askCount >= DAILY_LIMIT;
 
