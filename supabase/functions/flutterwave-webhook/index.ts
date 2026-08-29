@@ -1,90 +1,57 @@
-// Supabase Edge Function: flutterwave-webhook
-// Flutterwave calls this automatically on every recurring monthly charge.
-// This is what keeps a subscription alive month to month WITHOUT the user
-// re-entering their card — Flutterwave stores the tokenized card and
-// charges it on schedule, then tells us the result here.
-//
-// Set this URL in your Flutterwave dashboard under Settings > Webhooks:
-//   https://<your-project-ref>.supabase.co/functions/v1/flutterwave-webhook
+import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { notifyAdmin } from "../_shared/notifyAdmin.ts";
+Deno.serve(async (req) => {
+  // 1. Verify the secret webhook password to block unauthorized fake requests
+  const flwSignature = req.headers.get("verif-hash");
+  if (!flwSignature || flwSignature !== Deno.env.get("FLW_SECRET_HASH")) {
+    return new Response("Unauthorized Signature", { status: 401 });
+  }
 
-const FLW_WEBHOOK_SECRET = Deno.env.get("FLW_WEBHOOK_SECRET")!; // the "secret hash" you set in Flutterwave's dashboard
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const FROM_EMAIL = Deno.env.get("WELCOME_EMAIL_FROM") || "Cookify <onboarding@resend.dev>";
-
-async function emailUser(to: string, subject: string, html: string) {
-  if (!RESEND_API_KEY) return;
   try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
-    });
-  } catch (e) {
-    console.error("flutterwave-webhook: emailUser failed", e);
-  }
-}
+    const body = await req.json();
+    
+    // 2. Only look for completed, fully paid transactions
+    if (body.event === "charge.completed" && body.data.status === "successful") {
+      const txRef = body.data.tx_ref;
+      const userEmail = body.data.customer.email;
+      
+      // Extract the tracking tracking metadata from your frontend payload
+      const userId = body.data.meta?.supabase_user_id;
+      const tierPurchased = body.data.meta?.tier_purchased || 'pro'; 
 
-Deno.serve(async (req: Request) => {
-  const signature = req.headers.get("verif-hash");
-  if (!signature || signature !== FLW_WEBHOOK_SECRET) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+      if (!userId) {
+        return new Response("Missing User UUID Metadata", { status: 400 });
+      }
 
-  const payload = await req.json();
-  const event = payload?.event;
-  const data = payload?.data;
-  const email = data?.customer?.email;
-  if (!email) return new Response("ok", { status: 200 });
+      // 3. Authenticate with your private administrative security keys
+      const supabaseAdmin = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      )
 
-  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+      // 4. Update the user account plan status in your database
+      const { error } = await supabaseAdmin
+        .from('subscriptions')
+        .upsert({
+          id: userId,
+          email: userEmail,
+          tier: tierPurchased,
+          flutterwave_ref: txRef,
+          flw_customer_id: String(body.data.customer.id),
+          updated_at: new Date().toISOString()
+        });
 
-  if (event === "charge.completed" && data.status === "successful") {
-    const periodEnd = new Date();
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+      if (error) {
+        console.error("Database update error:", error);
+        return new Response("Database Write Failure", { status: 500 });
+      }
 
-    const { error } = await admin
-      .from("subscriptions")
-      .update({
-        status: "active",
-        current_period_end: periodEnd.toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("flw_customer_email", email);
-
-    if (error) {
-      console.error("flutterwave-webhook: renewal update failed", error);
-      await notifyAdmin(
-        "Renewal charge succeeded but DB update failed",
-        `${email}'s renewal charge succeeded on Flutterwave, but updating their subscription row failed:\n${JSON.stringify(error)}`
-      );
+      return new Response("Subscription Successfully Activated", { status: 200 });
     }
+
+    return new Response("Event ignored", { status: 200 });
+  } catch (err) {
+    return new Response("Invalid request payload JSON", { status: 400 });
   }
+})
 
-  if (event === "subscription.cancelled" || (event === "charge.completed" && data.status === "failed")) {
-    const { error } = await admin
-      .from("subscriptions")
-      .update({ status: "inactive", updated_at: new Date().toISOString() })
-      .eq("flw_customer_email", email);
-
-    if (error) {
-      console.error("flutterwave-webhook: cancellation update failed", error);
-      await notifyAdmin(
-        "Subscription cancellation/failed-charge DB update failed",
-        `${email}'s subscription needed to be marked inactive (event: ${event}), but the update failed:\n${JSON.stringify(error)}`
-      );
-    } else if (event === "charge.completed" && data.status === "failed") {
-      await emailUser(
-        email,
-        "Your Cookify payment didn't go through",
-        `<div style="font-family: -apple-system, sans-serif;"><p>Your latest Cookify subscription charge failed, so your Pro access has been paused. Update your payment method and resubscribe from the app to pick up where you left off.</p></div>`
-      );
-    }
-  }
-
-  return new Response("ok", { status: 200 });
-});
