@@ -1,6 +1,10 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Bell, Moon, Sun, LogOut, Crown, ChevronRight, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Bell, Moon, Sun, LogOut, Crown, ChevronRight, Trash2, Loader2, Droplet, Utensils, ShieldAlert, Check } from "lucide-react";
 import { supabase } from "../supabase";
+import { Capacitor } from "@capacitor/core";
+import { getUserItem, setUserItem } from "../utils/userStorage";
+import { enableWaterReminders, disableWaterReminders, enableMealReminders, disableMealReminders } from "../utils/notifications";
+import { isAdmin } from "../utils/admin";
 
 export default function Settings({ isPremium = false, onBack = () => {}, onLogout = () => {}, theme = "dark", onToggleTheme = () => {}, authUser = null }) {
   const [deleting, setDeleting] = useState(false);
@@ -10,6 +14,88 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
   );
   const [notifStatus, setNotifStatus] = useState("");
   const [soundEffects, setSoundEffects] = useState(true);
+
+  const [waterReminders, setWaterReminders] = useState(false);
+  const [mealReminders, setMealReminders] = useState(false);
+  const [reminderStatus, setReminderStatus] = useState("");
+
+  const admin = isAdmin(authUser);
+  const [flaggedComments, setFlaggedComments] = useState([]);
+  const [flaggedListings, setFlaggedListings] = useState([]);
+
+  useEffect(() => {
+    if (!admin) return;
+    supabase.from("comments").select("id, text, flag_reason, created_at").eq("flagged", true)
+      .order("created_at", { ascending: false }).then(({ data }) => setFlaggedComments(data || []));
+    supabase.from("food_listings").select("id, title, description, flag_reason, created_at").eq("flagged", true)
+      .order("created_at", { ascending: false }).then(({ data }) => setFlaggedListings(data || []));
+  }, [admin]);
+
+  const approveComment = async (id) => {
+    await supabase.from("comments").update({ flagged: false }).eq("id", id);
+    setFlaggedComments((prev) => prev.filter((c) => c.id !== id));
+  };
+  const deleteComment = async (id) => {
+    await supabase.from("comments").delete().eq("id", id);
+    setFlaggedComments((prev) => prev.filter((c) => c.id !== id));
+  };
+  const approveListing = async (id) => {
+    await supabase.from("food_listings").update({ flagged: false, is_visible: true }).eq("id", id);
+    setFlaggedListings((prev) => prev.filter((l) => l.id !== id));
+  };
+  const deleteListing = async (id) => {
+    await supabase.from("food_listings").delete().eq("id", id);
+    setFlaggedListings((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  useEffect(() => {
+    setWaterReminders(getUserItem(authUser, "cookify_water_reminders_on") === "true");
+    setMealReminders(getUserItem(authUser, "cookify_meal_reminders_on") === "true");
+  }, [authUser?.id]);
+
+  const toggleWaterReminders = async () => {
+    setReminderStatus("");
+    if (waterReminders) {
+      await disableWaterReminders(authUser);
+      setUserItem(authUser, "cookify_water_reminders_on", "false");
+      setWaterReminders(false);
+      return;
+    }
+    const ok = await enableWaterReminders(authUser, 2);
+    if (ok) {
+      setUserItem(authUser, "cookify_water_reminders_on", "true");
+      setWaterReminders(true);
+      setReminderStatus(
+        Capacitor.isNativePlatform()
+          ? "On — you'll get a real reminder every 2 hours, plus a confirmation just now."
+          : "On — you should see a confirmation notification just now. On the website, reminders only fire while this tab stays open; the native app delivers them in the background."
+      );
+    } else {
+      setReminderStatus("Notification permission was denied — enable it in your device settings to use reminders.");
+    }
+  };
+
+  const toggleMealReminders = async () => {
+    setReminderStatus("");
+    if (mealReminders) {
+      await disableMealReminders();
+      setUserItem(authUser, "cookify_meal_reminders_on", "false");
+      setMealReminders(false);
+      return;
+    }
+    const ok = await enableMealReminders();
+    if (ok) {
+      setUserItem(authUser, "cookify_meal_reminders_on", "true");
+      setMealReminders(true);
+      setReminderStatus(
+        Capacitor.isNativePlatform()
+          ? "On — breakfast, lunch, and supper reminders scheduled, plus a confirmation just now."
+          : "On — you should see a confirmation notification just now. On the website, reminders only fire while this tab stays open; the native app delivers them in the background."
+      );
+    } else {
+      setReminderStatus("Notification permission was denied — enable it in your device settings to use reminders.");
+    }
+  };
 
   const toggleNotifications = async () => {
     if (typeof Notification === "undefined") {
@@ -108,6 +194,54 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
         </section>
 
         <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          <p className="mb-4 text-xs uppercase tracking-[0.35em] text-gray-400">Reminders</p>
+
+          <div className="flex items-center justify-between py-2">
+            <div className="flex items-center gap-3">
+              <Droplet className="h-5 w-5 text-white/80" />
+              <div>
+                <p className="font-medium">Water Reminders</p>
+                <p className="text-xs text-gray-500">Every 2 hours</p>
+              </div>
+            </div>
+            <button
+              onClick={toggleWaterReminders}
+              className={`h-7 w-12 rounded-full transition ${waterReminders ? "bg-white" : "bg-white/10"}`}
+              aria-pressed={waterReminders}
+            >
+              <span
+                className={`block h-6 w-6 rounded-full shadow transition-transform ${
+                  waterReminders ? "translate-x-5 bg-black" : "translate-x-0.5 bg-gray-500"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between py-2">
+            <div className="flex items-center gap-3">
+              <Utensils className="h-5 w-5 text-white/80" />
+              <div>
+                <p className="font-medium">Meal Reminders</p>
+                <p className="text-xs text-gray-500">Breakfast, lunch & supper</p>
+              </div>
+            </div>
+            <button
+              onClick={toggleMealReminders}
+              className={`h-7 w-12 rounded-full transition ${mealReminders ? "bg-white" : "bg-white/10"}`}
+              aria-pressed={mealReminders}
+            >
+              <span
+                className={`block h-6 w-6 rounded-full shadow transition-transform ${
+                  mealReminders ? "translate-x-5 bg-black" : "translate-x-0.5 bg-gray-500"
+                }`}
+              />
+            </button>
+          </div>
+
+          {reminderStatus && <p className="mt-1 text-xs text-gray-500">{reminderStatus}</p>}
+        </section>
+
+        <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Crown className="h-5 w-5 text-white/80" />
@@ -119,6 +253,46 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
             <ChevronRight className="h-5 w-5 text-white/40" />
           </div>
         </section>
+
+        {admin && (flaggedComments.length > 0 || flaggedListings.length > 0) && (
+          <section className="rounded-3xl border border-amber-500/20 bg-amber-500/5 p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <ShieldAlert className="h-4 w-4 text-amber-300" />
+              <p className="text-xs uppercase tracking-[0.35em] text-amber-300">Needs Review</p>
+            </div>
+
+            {flaggedComments.map((c) => (
+              <div key={c.id} className="mb-3 rounded-2xl border border-white/10 bg-black/40 p-3">
+                <p className="text-sm text-white/90">{c.text}</p>
+                <p className="mt-1 text-xs text-amber-300/80">Flagged: {c.flag_reason || "unspecified"}</p>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={() => approveComment(c.id)} className="flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white">
+                    <Check className="h-3 w-3" /> Approve
+                  </button>
+                  <button onClick={() => deleteComment(c.id)} className="flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-300">
+                    <Trash2 className="h-3 w-3" /> Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {flaggedListings.map((l) => (
+              <div key={l.id} className="mb-3 rounded-2xl border border-white/10 bg-black/40 p-3">
+                <p className="text-sm font-bold text-white/90">{l.title}</p>
+                <p className="text-sm text-white/70">{l.description}</p>
+                <p className="mt-1 text-xs text-amber-300/80">Flagged: {l.flag_reason || "unspecified"}</p>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={() => approveListing(l.id)} className="flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white">
+                    <Check className="h-3 w-3" /> Approve
+                  </button>
+                  <button onClick={() => deleteListing(l.id)} className="flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-300">
+                    <Trash2 className="h-3 w-3" /> Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
 
         <section className="rounded-3xl border border-rose-500/20 bg-rose-500/5 p-5">
           <div className="flex items-center gap-3 mb-2">

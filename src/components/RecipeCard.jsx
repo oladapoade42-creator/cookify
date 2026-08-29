@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X, CirclePlay } from "lucide-react";
+import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X, CirclePlay, MapPin, Loader2 } from "lucide-react";
 import { supabase } from "../supabase";
+import { moderateText } from "../utils/moderation";
 
 export default function RecipeCard({
   recipeId,
@@ -33,6 +34,9 @@ export default function RecipeCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [postingComment, setPostingComment] = useState(false);
+  const [showWhereToBuy, setShowWhereToBuy] = useState(false);
+  const [whereToBuyResults, setWhereToBuyResults] = useState(null); // null = not searched yet
+  const [loadingWhereToBuy, setLoadingWhereToBuy] = useState(false);
   const cardRootRef = useRef(null);
 
   // Fires onView once, the first time this card is genuinely visible on
@@ -119,8 +123,9 @@ export default function RecipeCard({
     let cancelled = false;
     supabase
       .from("comments")
-      .select("id, provider, text, created_at")
+      .select("id, provider, text, created_at, flagged")
       .eq("recipe_id", String(recipeId))
+      .eq("flagged", false)
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
         if (!cancelled && !error && data) setComments(data);
@@ -175,22 +180,74 @@ export default function RecipeCard({
     if (!text) return;
 
     setPostingComment(true);
+
+    // Runs before the insert — flagged comments still get saved (so
+    // nothing is ever silently lost), just hidden from the public feed
+    // (the .eq("flagged", false) filter above) until reviewed.
+    const { flagged, reason } = await moderateText(text);
+
     const newComment = {
       recipe_id: String(recipeId),
+      user_id: authUser?.id || null,
       provider: authProvider,
       text,
+      flagged,
+      flag_reason: flagged ? reason : null,
     };
 
     try {
       const { data, error } = await supabase.from("comments").insert(newComment).select().single();
       if (error) throw error;
-      setComments((prev) => [data, ...prev]);
+      if (!flagged) setComments((prev) => [data, ...prev]);
       setCommentDraft("");
+      if (flagged) setFeedback("Your comment was posted and is pending a quick review.");
     } catch (e) {
       setFeedback("Comments aren't set up on the backend yet — this comment wasn't saved.");
     }
     setPostingComment(false);
   };
+
+  // Finds E-Restaurant sellers listing this dish (matched loosely on
+  // title, since sellers type their own listing names) and gives each
+  // one a "Get Directions" link — same Google Maps URL pattern already
+  // used in ERestaurant.jsx, opened via the address on the seller's
+  // profile rather than needing a paid Maps API key.
+  const handleWhereToBuy = async () => {
+    setShowWhereToBuy(true);
+    if (whereToBuyResults !== null || !title) return; // already searched once
+    setLoadingWhereToBuy(true);
+    try {
+      const { data: listings } = await supabase
+        .from("food_listings")
+        .select("id, seller_id, seller_name, title, price")
+        .ilike("title", `%${title}%`)
+        .eq("is_visible", true)
+        .limit(10);
+
+      if (!listings || listings.length === 0) {
+        setWhereToBuyResults([]);
+        return;
+      }
+
+      const sellerIds = [...new Set(listings.map((l) => l.seller_id))];
+      const { data: sellerProfiles } = await supabase
+        .from("profiles")
+        .select("user_id, seller_address")
+        .in("user_id", sellerIds);
+
+      const addressBySeller = Object.fromEntries((sellerProfiles || []).map((p) => [p.user_id, p.seller_address]));
+
+      setWhereToBuyResults(
+        listings.map((l) => ({ ...l, address: addressBySeller[l.seller_id] || null }))
+      );
+    } catch (e) {
+      setWhereToBuyResults([]);
+    }
+    setLoadingWhereToBuy(false);
+  };
+
+  const directionsUrl = (address) =>
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 
   const handleShare = async (ev) => {
     ev.stopPropagation();
@@ -406,6 +463,51 @@ export default function RecipeCard({
                 <CirclePlay className="w-4 h-4" />
                 Watch on YouTube
               </a>
+            )}
+
+            {title && (
+              <button
+                type="button"
+                onClick={(ev) => { ev.stopPropagation(); handleWhereToBuy(); }}
+                className="flex items-center justify-center gap-2 rounded-[20px] border border-white/10 bg-emerald-600/10 py-3 text-sm font-bold uppercase tracking-[0.2em] text-emerald-400 transition hover:bg-emerald-600/20"
+              >
+                <MapPin className="w-4 h-4" />
+                Where to Buy
+              </button>
+            )}
+
+            {showWhereToBuy && (
+              <div className="rounded-[20px] border border-white/10 bg-zinc-900/80 p-4" onClick={(ev) => ev.stopPropagation()}>
+                {loadingWhereToBuy ? (
+                  <p className="flex items-center gap-2 text-sm text-gray-400"><Loader2 className="w-4 h-4 animate-spin" /> Looking for sellers nearby...</p>
+                ) : whereToBuyResults?.length ? (
+                  <div className="space-y-2">
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-gray-500">Sold by Cookify sellers</p>
+                    {whereToBuyResults.map((r) => (
+                      <div key={r.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/40 p-3">
+                        <div>
+                          <p className="text-sm font-bold text-white">{r.title}</p>
+                          <p className="text-xs text-gray-400">{r.seller_name || "Cookify Seller"} • ${r.price}</p>
+                        </div>
+                        {r.address ? (
+                          <a
+                            href={directionsUrl(r.address)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-white/10"
+                          >
+                            Directions
+                          </a>
+                        ) : (
+                          <span className="shrink-0 text-xs text-gray-500">No address listed</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400">No Cookify sellers currently list this dish. Check E-Restaurant to see everything on offer.</p>
+                )}
+              </div>
             )}
           </div>
         )}

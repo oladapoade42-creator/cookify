@@ -7,14 +7,65 @@ import { pickNaturalVoice, stopSpeaking } from "../utils/voice";
 import { getDailyTrivia } from "../utils/dailyTrivia";
 import AdSlot from "../components/AdSlot";
 import { downloadTextPdf } from "../utils/pdf";
+import { showExitInterstitial } from "../utils/ads";
+import { getUserItem, setUserItem } from "../utils/userStorage";
+import { enableDietPlanReminder } from "../utils/notifications";
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 
 const SCAN_MODE_PROMPTS = {
   calories: `You are a food-only calorie scanner for Cookify. Analyze this photo. If it is not clearly food, tell the user to point the camera at a meal or snack instead. Otherwise identify the dish and give an estimated calorie count plus a rough macro breakdown (protein/carbs/fat). Keep it concise and under 80 words.`,
-  dietplan: `You are a nutrition assistant for Cookify. Analyze this photo of food. If it is not clearly food, tell the user to point the camera at a meal instead. Otherwise suggest how this food could fit into a simple, balanced daily diet plan (what to pair it with for a full day of eating). Keep it concise, practical, and under 100 words.`,
+
+  dietplan: `You are a nutrition assistant for Cookify. Analyze this photo of food. If it is not clearly food, say so and ask for a clear photo of a meal instead.
+
+Otherwise suggest how this food could fit into a simple, balanced daily diet plan (what to pair it with across a full day of eating).
+
+Respond ONLY with strict JSON, no markdown code fences, no extra commentary, in exactly this shape:
+{"summary": "a concise, practical plan under 100 words", "ingredients": ["ingredient 1", "ingredient 2"]}
+"ingredients" should be a practical grocery list (6-12 short items) covering what's needed to make the full day of meals you suggest.`,
+
+  // Someone uploads a full-body photo of themselves (not food) hoping for
+  // general diet guidance. This is deliberately NOT framed as a body
+  // measurement/diagnostic tool: no AI can reliably estimate weight or
+  // body composition from a photo, and presenting a confident-sounding
+  // number would be misleading and could be genuinely hurtful. Instead
+  // this asks for kind, general, food-forward suggestions only.
+  dietplanBody: `You are a supportive, encouraging general-wellness assistant for Cookify, a cooking app. Someone has shared a full-body photo of themselves hoping for general diet and fitness-food suggestions. You are not a doctor, and this is not a medical or diagnostic assessment.
+
+Strict rules:
+- Never state or estimate a specific weight, body-fat percentage, or BMI number — photo-based estimates like these are unreliable and can be hurtful. Do not guess a number in any form.
+- Never use judgmental, critical, or clinical language about their body or appearance.
+- If a general sense of build is useful for tailoring suggestions (e.g. "looks like you're already active" or "adding a bit more protein could support building strength"), keep it brief, kind, and non-numeric.
+- Focus almost entirely on practical, balanced, encouraging food suggestions to support general fitness and energy — not weight-loss framing, not restriction.
+- If the photo doesn't clearly show a person, say so and ask for a clear full-body photo instead.
+- End with a brief, genuine note that a doctor or registered dietitian can give real personalized numbers and medical advice.
+
+Respond ONLY with strict JSON, no markdown code fences, no extra commentary, in exactly this shape:
+{"summary": "2-4 encouraging, food-focused sentences, under 120 words", "ingredients": ["ingredient 1", "ingredient 2"]}
+"ingredients" should be a practical grocery list (6-12 short items) covering what's needed to make a few balanced meals matching your suggestion.`,
+
   ingredients: `You are a kitchen assistant for Cookify. Analyze this photo of ingredients. If it is not clearly food or ingredients, tell the user to point the camera at their ingredients instead. Otherwise list the ingredients you can see, then suggest one simple dish the user could make with them. Keep it concise and under 100 words.`,
 };
+
+const STRUCTURED_MODES = new Set(["dietplan", "dietplanBody"]);
+
+function parseStructuredPlan(rawText) {
+  // Gemini sometimes wraps JSON in ```json fences despite being told not
+  // to — strip those before parsing.
+  const cleaned = rawText.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    return {
+      summary: typeof parsed.summary === "string" ? parsed.summary : rawText,
+      ingredients: Array.isArray(parsed.ingredients) ? parsed.ingredients.filter((i) => typeof i === "string") : [],
+    };
+  } catch (e) {
+    // Model didn't return valid JSON — fall back to showing the raw text
+    // rather than losing the response entirely. No ingredients list in
+    // this case, but the plan itself still displays.
+    return { summary: rawText, ingredients: [] };
+  }
+}
 
 async function analyzeFoodImage(imageBase64, mode = "calories") {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
@@ -47,16 +98,23 @@ async function analyzeFoodImage(imageBase64, mode = "calories") {
     if (!response.ok) throw new Error("Gemini request failed");
 
     const data = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't read the food clearly from this photo.";
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "I couldn't read the photo clearly.";
 
-    return {
-      title: mode === "calories" ? "Calorie estimate" : mode === "dietplan" ? "Diet plan suggestion" : "Ingredient suggestion",
-      body: text,
-    };
+    const title = mode === "calories" ? "Calorie estimate"
+      : mode === "dietplan" ? "Diet plan suggestion"
+      : mode === "dietplanBody" ? "Your personalized diet plan"
+      : "Ingredient suggestion";
+
+    if (STRUCTURED_MODES.has(mode)) {
+      const { summary, ingredients } = parseStructuredPlan(text);
+      return { title, body: summary, ingredients };
+    }
+
+    return { title, body: text };
   } catch (error) {
     return {
       title: "Food scan result",
-      body: "The scan could not be completed right now. Please try again with a clearer photo of food.",
+      body: "The scan could not be completed right now. Please try again with a clearer photo.",
     };
   }
 }
@@ -597,6 +655,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   }, [cameraReady]);
 
   const galleryInputRef = useRef(null);
+  const bodyPhotoInputRef = useRef(null);
 
   // Resizes/compresses a picked photo to a reasonable JPEG before sending
   // it to Gemini — keeps uploads fast and consistent whether the photo
@@ -623,7 +682,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
       reader.readAsDataURL(file);
     });
 
-  const handleGallerySelect = async (event) => {
+  const handleGallerySelect = async (event, modeOverride) => {
     const file = event.target.files?.[0];
     // Reset so picking the same file again still fires onChange next time.
     event.target.value = "";
@@ -639,12 +698,42 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     setIsLoadingScan(true);
     try {
       const base64 = await fileToJpegBase64(file);
-      const analysis = await analyzeFoodImage(base64, scanMode);
+      const analysis = await analyzeFoodImage(base64, modeOverride || scanMode);
       setScanResult(analysis);
     } catch (e) {
       setScanError(e.message || "Couldn't read that photo — please try another.");
     }
     setIsLoadingScan(false);
+  };
+
+  const handleBodyPhotoSelect = (event) => handleGallerySelect(event, "dietplanBody");
+
+  const [savingDietPlan, setSavingDietPlan] = useState(false);
+
+  const handleSaveDietPlan = async () => {
+    if (!scanResult) return;
+    const plan = {
+      id: `plan-${Date.now()}`,
+      title: scanResult.title || "Diet plan",
+      body: scanResult.body,
+      ingredients: scanResult.ingredients || [],
+      createdAt: Date.now(),
+    };
+
+    try {
+      const existing = JSON.parse(getUserItem(authUser, "cookify_diet_plans") || "[]");
+      const next = Array.isArray(existing) ? [plan, ...existing] : [plan];
+      setUserItem(authUser, "cookify_diet_plans", JSON.stringify(next));
+    } catch (e) {
+      setUserItem(authUser, "cookify_diet_plans", JSON.stringify([plan]));
+    }
+
+    // Also (re)schedules the daily diet-plan reminder to reference this
+    // plan — no-ops quietly if notification permission isn't granted.
+    enableDietPlanReminder(plan.title);
+
+    setSavingDietPlan(true);
+    setTimeout(() => setSavingDietPlan(false), 2000);
   };
 
   const captureAndAnalyze = async () => {
@@ -719,7 +808,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
               ) : (
                 <div className="flex h-[280px] items-center justify-center bg-zinc-950 p-6 text-center text-sm text-gray-400">
                   {scanMode === "calories" && "Point the camera at your meal, or upload a photo from your gallery, to estimate calories and macros."}
-                  {scanMode === "dietplan" && "Point the camera at your meal, or upload a photo from your gallery, to get diet plan suggestions."}
+                  {scanMode === "dietplan" && "Point the camera at your meal, or upload a photo from your gallery, to get diet plan suggestions — or upload a full-body photo below for a plan built around you."}
                   {scanMode === "ingredients" && "Point the camera at your ingredients, or upload a photo from your gallery, to get a recipe idea."}
                 </div>
               )}
@@ -733,6 +822,24 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
               onChange={handleGallerySelect}
               className="hidden"
             />
+            <input
+              ref={bodyPhotoInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleBodyPhotoSelect}
+              className="hidden"
+            />
+
+            {scanMode === "dietplan" && (
+              <button
+                onClick={() => bodyPhotoInputRef.current?.click()}
+                disabled={isLoadingScan}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-[18px] border border-white/15 bg-white/5 py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-white transition hover:bg-white/10 disabled:opacity-60"
+              >
+                <ImageIcon className="h-4 w-4" />
+                Upload a full-body photo instead
+              </button>
+            )}
 
             {scanError && <p className="mt-3 text-sm text-red-400">{scanError}</p>}
 
@@ -740,13 +847,34 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
               <div className="mt-4 rounded-[20px] border border-white/10 bg-zinc-900/80 p-4">
                 <p className="text-[10px] uppercase tracking-[0.3em] text-gray-400">{scanResult.title}</p>
                 <p className="mt-2 text-sm leading-6 text-white whitespace-pre-wrap">{scanResult.body}</p>
+                {scanResult.ingredients?.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-gray-500 mb-1.5">Ingredients you'll need</p>
+                    <ul className="flex flex-wrap gap-1.5">
+                      {scanResult.ingredients.map((ing, i) => (
+                        <li key={i} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/80">
+                          {ing}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {scanMode === "dietplan" && (
-                  <button
-                    onClick={() => downloadTextPdf("cookify-diet-plan", "Your Cookify Diet Plan", scanResult.body)}
-                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-[18px] border border-white/15 bg-white/5 py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-white transition hover:bg-white/10"
-                  >
-                    Download as PDF
-                  </button>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => downloadTextPdf("cookify-diet-plan", "Your Cookify Diet Plan", scanResult.body)}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-[18px] border border-white/15 bg-white/5 py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-white transition hover:bg-white/10"
+                    >
+                      Download as PDF
+                    </button>
+                    <button
+                      onClick={handleSaveDietPlan}
+                      disabled={savingDietPlan}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-[18px] bg-white py-2.5 text-xs font-bold uppercase tracking-[0.2em] text-black transition hover:bg-white/90 disabled:opacity-60"
+                    >
+                      {savingDietPlan ? "Saved ✓" : "Save"}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -1213,7 +1341,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
         <div className="cookify-sheet-in w-full bg-black sm:max-w-[420px] sm:rounded-[36px] sm:border sm:border-white/10 sm:shadow-[0_30px_90px_rgba(0,0,0,0.6)] sm:overflow-hidden sm:self-start">
           <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-white/10 bg-black/90 backdrop-blur-xl p-4">
             <button
-              onClick={() => setExpandedRecipe(null)}
+              onClick={() => { setExpandedRecipe(null); showExitInterstitial(); }}
               className="rounded-full border border-white/15 bg-white/5 backdrop-blur-xl p-2 text-white transition hover:bg-white/10"
               aria-label="Back to feed"
             >

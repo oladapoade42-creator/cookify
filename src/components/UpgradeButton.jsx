@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useFlutterwave, closePaymentModal } from "flutterwave-react-v3";
-import { Loader2, Lock } from "lucide-react";
+import { Loader2, Lock, Crown } from "lucide-react";
 import { supabase } from "../supabase";
 
 const TIER_CONFIG = {
@@ -36,7 +36,7 @@ const TIER_CONFIG = {
 // which guarantees a bad/missing env var can never crash the app (it did
 // exactly that before this fix, since the hook ran on every render,
 // including in the main app header for every logged-in user).
-export default function UpgradeButton({ authUser, currentTier, tier = "pro", onUpgraded, className }) {
+export default function UpgradeButton({ authUser, currentTier, tier = "pro", onUpgraded, className, compact }) {
   const cfg = TIER_CONFIG[tier];
   const isActive = currentTier === tier;
   const publicKey = import.meta.env.VITE_FLW_PUBLIC_KEY || "";
@@ -46,9 +46,12 @@ export default function UpgradeButton({ authUser, currentTier, tier = "pro", onU
       <button
         type="button"
         onClick={() => alert("Payments aren't configured yet — missing VITE_FLW_PUBLIC_KEY. Add it in your hosting provider's environment variables and redeploy.")}
-        className={className || "rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] border border-white/15 bg-white/5 text-gray-400"}
+        title={cfg.label}
+        className={className || (compact
+          ? "p-2 rounded-full border border-white/15 bg-white/5 text-gray-400"
+          : "rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] border border-white/15 bg-white/5 text-gray-400")}
       >
-        <span className="flex items-center gap-2"><Lock className="w-3 h-3" /> {cfg.label}</span>
+        {compact ? <Lock className="w-4 h-4" /> : <span className="flex items-center gap-2"><Lock className="w-3 h-3" /> {cfg.label}</span>}
       </button>
     );
   }
@@ -62,11 +65,12 @@ export default function UpgradeButton({ authUser, currentTier, tier = "pro", onU
       publicKey={publicKey}
       onUpgraded={onUpgraded}
       className={className}
+      compact={compact}
     />
   );
 }
 
-function UpgradeButtonActive({ authUser, isActive, tier, cfg, publicKey, onUpgraded, className }) {
+function UpgradeButtonActive({ authUser, isActive, tier, cfg, publicKey, onUpgraded, className, compact }) {
   const [verifying, setVerifying] = useState(false);
   const planId = import.meta.env[cfg.planEnvKey] || "";
 
@@ -112,7 +116,7 @@ function UpgradeButtonActive({ authUser, isActive, tier, cfg, publicKey, onUpgra
           });
 
           if (error || !data?.success) {
-            alert("Payment received, but we couldn't confirm it automatically. Contact support if it doesn't activate shortly.");
+            alert(data?.error || "Payment received, but we couldn't confirm it automatically. Contact support if it doesn't activate shortly.");
           } else {
             onUpgraded?.(tier);
           }
@@ -130,11 +134,18 @@ function UpgradeButtonActive({ authUser, isActive, tier, cfg, publicKey, onUpgra
     <button
       onClick={startCheckout}
       disabled={isActive || verifying}
-      className={className || `rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] transition backdrop-blur-xl ${
-        isActive ? "bg-white/90 text-black border border-white/30" : "bg-white/10 text-white border border-white/15 hover:bg-white/20"
-      }`}
+      title={isActive ? cfg.activeLabel : cfg.label}
+      className={className || (compact
+        ? `p-2 rounded-full transition backdrop-blur-xl ${
+            isActive ? "bg-white/90 text-black border border-white/30" : "bg-white/10 text-white border border-white/15 hover:bg-white/20"
+          }`
+        : `rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] transition backdrop-blur-xl ${
+            isActive ? "bg-white/90 text-black border border-white/30" : "bg-white/10 text-white border border-white/15 hover:bg-white/20"
+          }`)}
     >
-      {verifying ? (
+      {compact ? (
+        verifying ? <Loader2 className="w-4 h-4 animate-spin" /> : <Crown className="w-4 h-4" />
+      ) : verifying ? (
         <span className="flex items-center gap-2"><Loader2 className="w-3 h-3 animate-spin" /> Confirming...</span>
       ) : isActive ? (
         cfg.activeLabel

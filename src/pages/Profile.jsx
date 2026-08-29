@@ -6,11 +6,15 @@ import {
   Store,
   X,
   ChefHat,
+  Droplet,
+  Salad,
+  Trash2,
 } from "lucide-react";
 import { supabase } from "../supabase";
 import UpgradeButton from "../components/UpgradeButton";
 import { getUserItem, setUserItem } from "../utils/userStorage";
 import { findAvailableUsername, isUsernameAvailable, nameFromAuthUser, slugifyUsername } from "../utils/username";
+import { getNextWaterReminderTime, rollWaterReminderForward } from "../utils/notifications";
 
 const ACCENT_COLORS = [
   { name: "White", value: "#ffffff" },
@@ -55,6 +59,58 @@ export default function Profile({
   const [locationStatus, setLocationStatus] = useState("");
   const [showCookedModal, setShowCookedModal] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState(""); // transient feedback while editing
+
+  // Live water-reminder countdown — only runs if the person has turned
+  // water reminders on in Settings. Rolls itself forward to the next
+  // 2-hour window as soon as it hits zero, so it keeps counting down
+  // "after each session" indefinitely without needing anything else to
+  // trigger it.
+  const [waterRemindersOn, setWaterRemindersOn] = useState(false);
+  const [waterCountdown, setWaterCountdown] = useState("");
+
+  useEffect(() => {
+    const on = getUserItem(authUser, "cookify_water_reminders_on") === "true";
+    setWaterRemindersOn(on);
+    if (!on) return;
+
+    const WATER_INTERVAL_HOURS = 2;
+    const tick = () => {
+      let target = getNextWaterReminderTime(authUser, WATER_INTERVAL_HOURS);
+      let remainingMs = target.getTime() - Date.now();
+      if (remainingMs <= 0) {
+        target = rollWaterReminderForward(authUser, WATER_INTERVAL_HOURS);
+        remainingMs = target.getTime() - Date.now();
+      }
+      const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+      const h = Math.floor(totalSeconds / 3600);
+      const m = Math.floor((totalSeconds % 3600) / 60);
+      const s = totalSeconds % 60;
+      setWaterCountdown(`${h > 0 ? `${h}h ` : ""}${String(m).padStart(2, "0")}m ${String(s).padStart(2, "0")}s`);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [authUser?.id]);
+
+  // Saved diet plans (from the Diet Plan scan mode's "Save" button).
+  // Stored per account, same pattern as favorites/progress.
+  const [dietPlans, setDietPlans] = useState([]);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(getUserItem(authUser, "cookify_diet_plans") || "[]");
+      setDietPlans(Array.isArray(stored) ? stored : []);
+    } catch (e) {
+      setDietPlans([]);
+    }
+  }, [authUser?.id]);
+
+  const deleteDietPlan = (id) => {
+    const next = dietPlans.filter((p) => p.id !== id);
+    setDietPlans(next);
+    setUserItem(authUser, "cookify_diet_plans", JSON.stringify(next));
+  };
 
   // Local (fast) load, scoped per account so switching Google accounts
   // never shows a different person's photo/username/color.
@@ -318,6 +374,19 @@ export default function Profile({
           </div>
         </div>
 
+        {waterRemindersOn && (
+          <div className="mt-4 rounded-3xl border border-sky-400/20 bg-sky-500/5 p-5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Droplet className="h-6 w-6 text-sky-300" />
+              <div>
+                <p className="text-xs uppercase tracking-[0.35em] text-gray-400">Next Water Break</p>
+                <p className="text-sm text-white/60">Turn off anytime in Settings</p>
+              </div>
+            </div>
+            <p className="text-2xl font-black tabular-nums text-sky-200">{waterCountdown}</p>
+          </div>
+        )}
+
         <div className="mt-6 space-y-3">
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5 flex items-center justify-between gap-4">
             <div>
@@ -403,6 +472,53 @@ export default function Profile({
             </button>
           </div>
         )}
+
+        <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Salad className="h-4 w-4" />
+            <p className="text-xs uppercase tracking-[0.35em] text-gray-400">My Diet Plans</p>
+          </div>
+
+          {dietPlans.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              Diet plans you save from Scan Food → Diet Plan will show up here, with reminders and the ingredients you'll need.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {dietPlans.map((plan) => (
+                <div key={plan.id} className="rounded-2xl border border-white/10 bg-black/40 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-bold text-white">{plan.title}</p>
+                      <p className="text-xs text-gray-500">{new Date(plan.createdAt).toLocaleDateString()}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => deleteDietPlan(plan.id)}
+                      aria-label="Delete diet plan"
+                      className="shrink-0 text-white/40 transition hover:text-rose-300"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-white/80 whitespace-pre-wrap">{plan.body}</p>
+                  {plan.ingredients?.length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-gray-500 mb-1">Ingredients needed</p>
+                      <ul className="flex flex-wrap gap-1.5">
+                        {plan.ingredients.map((ing, i) => (
+                          <li key={i} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/80">
+                            {ing}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="mt-6 space-y-4">
           <button

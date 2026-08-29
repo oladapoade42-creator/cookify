@@ -1,0 +1,5 @@
+{
+  "appId": "io.cookify.app",
+  "appName": "cookify.io",
+  "webDir": "dist"
+}

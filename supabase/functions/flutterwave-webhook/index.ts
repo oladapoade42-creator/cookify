@@ -8,10 +8,26 @@
 //   https://<your-project-ref>.supabase.co/functions/v1/flutterwave-webhook
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { notifyAdmin } from "../_shared/notifyAdmin.ts";
 
 const FLW_WEBHOOK_SECRET = Deno.env.get("FLW_WEBHOOK_SECRET")!; // the "secret hash" you set in Flutterwave's dashboard
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const FROM_EMAIL = Deno.env.get("WELCOME_EMAIL_FROM") || "Cookify <onboarding@resend.dev>";
+
+async function emailUser(to: string, subject: string, html: string) {
+  if (!RESEND_API_KEY) return;
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+    });
+  } catch (e) {
+    console.error("flutterwave-webhook: emailUser failed", e);
+  }
+}
 
 Deno.serve(async (req: Request) => {
   const signature = req.headers.get("verif-hash");
@@ -31,7 +47,7 @@ Deno.serve(async (req: Request) => {
     const periodEnd = new Date();
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 
-    await admin
+    const { error } = await admin
       .from("subscriptions")
       .update({
         status: "active",
@@ -39,13 +55,35 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       })
       .eq("flw_customer_email", email);
+
+    if (error) {
+      console.error("flutterwave-webhook: renewal update failed", error);
+      await notifyAdmin(
+        "Renewal charge succeeded but DB update failed",
+        `${email}'s renewal charge succeeded on Flutterwave, but updating their subscription row failed:\n${JSON.stringify(error)}`
+      );
+    }
   }
 
   if (event === "subscription.cancelled" || (event === "charge.completed" && data.status === "failed")) {
-    await admin
+    const { error } = await admin
       .from("subscriptions")
       .update({ status: "inactive", updated_at: new Date().toISOString() })
       .eq("flw_customer_email", email);
+
+    if (error) {
+      console.error("flutterwave-webhook: cancellation update failed", error);
+      await notifyAdmin(
+        "Subscription cancellation/failed-charge DB update failed",
+        `${email}'s subscription needed to be marked inactive (event: ${event}), but the update failed:\n${JSON.stringify(error)}`
+      );
+    } else if (event === "charge.completed" && data.status === "failed") {
+      await emailUser(
+        email,
+        "Your Cookify payment didn't go through",
+        `<div style="font-family: -apple-system, sans-serif;"><p>Your latest Cookify subscription charge failed, so your Pro access has been paused. Update your payment method and resubscribe from the app to pick up where you left off.</p></div>`
+      );
+    }
   }
 
   return new Response("ok", { status: 200 });

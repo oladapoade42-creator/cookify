@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { Plus, MapPin, X, ShoppingBag, Loader2, ChefHat } from "lucide-react";
 import { supabase } from "../supabase";
 import { getUserItem } from "../utils/userStorage";
+import { moderateText } from "../utils/moderation";
 
 const ORDER_STAGES = ["pending", "preparing", "out_for_delivery", "delivered"];
 const STAGE_LABELS = {
@@ -164,6 +165,8 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
           .maybeSingle();
         sellerName = profile?.username || "Cookify Seller";
       }
+      const { flagged, reason } = await moderateText(`${draft.title}\n${draft.description}`);
+
       await supabase.from("food_listings").insert({
         seller_id: authUser.id,
         seller_name: sellerName,
@@ -171,10 +174,14 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
         price: parseFloat(draft.price),
         description: draft.description.trim(),
         image: draft.image || null,
+        flagged,
+        flag_reason: flagged ? reason : null,
+        is_visible: !flagged,
       });
       setDraft({ title: "", price: "", description: "", image: "" });
       setShowPostForm(false);
       loadListings();
+      if (flagged) alert("Your listing was saved and is pending a quick review before it appears publicly.");
     } catch (e) {
       alert("Couldn't post — the food_listings table may not be set up yet.");
     }

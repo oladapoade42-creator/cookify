@@ -14,6 +14,8 @@ import ERestaurant from './pages/ERestaurant';
 import UpgradeButton from './components/UpgradeButton';
 import { getUserItem, setUserItem, migrateAllLegacyKeys } from './utils/userStorage';
 import React, { useState, useEffect } from 'react';
+import { initAds } from './utils/ads';
+import { enableWaterReminders, enableMealReminders } from './utils/notifications';
 import {
   ChefHat,
   BookOpen,
@@ -33,14 +35,37 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  useEffect (() => {
+  useEffect(() => {
     //This ensures it only runs safely in the browser context
     inject();
   }, []);
+
+  useEffect(() => {
+    // No-ops on web (Vercel/browser) — only does anything inside the
+    // native Android/iOS app build. Preloads the first interstitial too,
+    // so one's ready the first time someone exits a recipe.
+    initAds();
+  }, []);
+
   // Authentication State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authProvider, setAuthProvider] = useState(null); // 'google' | 'apple' | 'guest'
   const [authUser, setAuthUser] = useState(null); // { id, email } for Google/Apple — null for guest
+
+  // Re-establishes any reminders the person had already turned on in
+  // Settings. This is a safety net, not the primary path (toggling a
+  // reminder on in Settings schedules it immediately) — it just covers
+  // cases like a fresh install/restore where the on/off preference came
+  // back but the underlying OS-level schedule didn't. Must come after
+  // authUser is declared above — it reads authUser?.id.
+  useEffect(() => {
+    if (getUserItem(authUser, "cookify_water_reminders_on") === "true") {
+      enableWaterReminders(authUser, 2);
+    }
+    if (getUserItem(authUser, "cookify_meal_reminders_on") === "true") {
+      enableMealReminders();
+    }
+  }, [authUser?.id]);
 
   // useState
   const handleLogin = async (provider) => {
@@ -314,37 +339,41 @@ export default function App() {
 
   // If not logged in, show the Auth Screen
   if (!isAuthenticated) {
-    return <AuthScreen onLogin={handleLogin} />;
+    return (
+      <div className="app-container">
+        <AuthScreen onLogin={handleLogin} />
+      </div>
+    );
   }
 
   return (
     <div className={`relative flex flex-col h-screen w-full max-w-[430px] mx-auto bg-slate-950 text-white overflow-hidden shadow-[0_20px_80px_rgba(0,0,0,0.45)] sm:rounded-[32px] ${theme === 'light' ? 'light-theme' : ''}`}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_18%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.04),transparent_18%),linear-gradient(180deg,rgba(0,0,0,0.95),rgba(0,0,0,0.99))]" />
-      {/* Top Header */}
-      <header title="Cookify - Learn, Cook, Enjoy" className="relative flex flex-col gap-3 px-4 py-4 bg-black/80 backdrop-blur-3xl border-b border-white/10 z-10 shrink-0">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setActiveTab('home')} aria-label="Home" className="p-2 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition">
-              <ChefHat className="w-6 h-6 text-white" />
-            </button>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight text-white">Cookify</h1>
-              <p className="text-[11px] uppercase tracking-[0.35em] text-gray-400">Black & white kitchen feed</p>
-            </div>
-          </div>
+      {/* Top Header — kept to a single compact row, like a typical app's
+          top bar, instead of the previous two-line header with a
+          subtitle and full-width pill buttons. Frees up vertical space
+          for the feed below. */}
+      <header title="Cookify - Learn, Cook, Enjoy" className="relative flex items-center justify-between gap-3 px-3 py-2 bg-black/80 backdrop-blur-3xl border-b border-white/10 z-10 shrink-0">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setActiveTab('home')} aria-label="Home" className="p-1.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition">
+            <ChefHat className="w-5 h-5 text-white" />
+          </button>
+          <h1 className="text-lg font-black tracking-tight text-white">Cookify</h1>
+        </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                setActiveTab('ai');
-                setTutorOpenRequest((v) => v + 1);
-              }}
-              className="rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.24em] bg-white/10 text-white border border-white/15 hover:bg-white/20 transition"
-            >
-              Open AI Chef
-            </button>
-            <UpgradeButton authUser={authUser} currentTier={tier} tier="pro" onUpgraded={upgradeToPro} />
-          </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setActiveTab('ai');
+              setTutorOpenRequest((v) => v + 1);
+            }}
+            aria-label="Open AI Chef"
+            title="Open AI Chef"
+            className="p-2 rounded-full bg-white/10 text-white border border-white/15 hover:bg-white/20 transition"
+          >
+            <Sparkles className="w-4 h-4" />
+          </button>
+          <UpgradeButton authUser={authUser} currentTier={tier} tier="pro" onUpgraded={upgradeToPro} compact />
         </div>
       </header>
       {/* Main Content Area */}
@@ -411,6 +440,7 @@ export default function App() {
     </div>
   );
 }
+
 
 // --- AUTHENTICATION SCREEN ---
 function AuthScreen({ onLogin }) {
@@ -860,4 +890,6 @@ function CalorieScanner() {
     </div>
   );
 }
+
+
 

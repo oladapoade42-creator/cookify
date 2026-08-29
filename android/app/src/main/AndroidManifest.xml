@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Required on Android 13+ before any local notification (water,
+         meal, diet plan reminders) can be shown. The @capacitor/local-notifications
+         plugin prompts for this at runtime, but the permission still has
+         to be declared here or that prompt/permission is a no-op. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets the plugin re-register scheduled reminders after the phone
+         restarts, so a water/meal reminder set for e.g. 1pm still fires
+         even if the phone was rebooted since it was scheduled. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+       <!-- C:/cookify. io/android/app/src/main/AndroidManifest.xml -->
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+        </provider>
+
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-2000428411922517~4125299993" />
+
+    </application>
+
+</manifest>
