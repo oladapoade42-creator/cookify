@@ -9,7 +9,10 @@ import { notifyAdmin } from "../_shared/notifyAdmin.ts";
 
 const FLW_SECRET_KEY = Deno.env.get("FLW_SECRET_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// Supabase renamed the service-role key to SUPABASE_SECRET_KEYS on newer
+// projects — check both names so this works regardless of which one your
+// project actually provides.
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_SECRET_KEYS")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const FROM_EMAIL = Deno.env.get("WELCOME_EMAIL_FROM") || "Cookify <onboarding@resend.dev>";
 
