@@ -1,13 +1,13 @@
-# Cookify — env var name fallbacks (Supabase's newer key naming)
+# Cookify — verify-payment now logs every failure path
 
-3 files: all three edge functions (overwrite).
+1 file: supabase/functions/verify-payment/index.ts
 
-Made every function check both possible names for the service-role key
-(SUPABASE_SERVICE_ROLE_KEY or SUPABASE_SECRET_KEYS — your secrets list
-showed the newer name) and the webhook secret (FLW_WEBHOOK_SECRET or
-FLW_SECRET_HASH — you already have the second one set). No need to
-rename anything you've already added; the code now works with what's
-actually there.
+Your logs showed the function running (boot -> shutdown) with zero
+output, even though it failed — because the auth-failure, verification-
+failure, and crash paths never had a console.log/console.error call in
+them. Added one to every single branch, including logging Flutterwave's
+full verification response. The next attempt will show exactly which
+check failed and why (bad secret key, amount mismatch, email mismatch,
+whatever it is) instead of a blank log.
 
-This does NOT fix the missing FLW_SECRET_KEY — that one has to be added,
-see the main reply for where to get it.
+Deploy: supabase functions deploy verify-payment

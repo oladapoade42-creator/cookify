@@ -48,12 +48,14 @@ Deno.serve(async (req) => {
     });
     const { data: userData, error: userError } = await userClient.auth.getUser(jwt);
     if (userError || !userData?.user) {
+      console.error("verify-payment: auth failed", userError);
       return new Response(JSON.stringify({ success: false, error: "Not authenticated" }), { status: 401 });
     }
     const user = userData.user;
 
     const { transaction_id, tier: requestedTier } = await req.json();
     if (!transaction_id) {
+      console.error("verify-payment: missing transaction_id in request body");
       return new Response(JSON.stringify({ success: false, error: "Missing transaction_id" }), { status: 400 });
     }
     const tier = requestedTier === "pro_plus" ? "pro_plus" : "pro";
@@ -64,12 +66,18 @@ Deno.serve(async (req) => {
     // though the person was correctly charged the advertised amount.
     const expectedAmount = tier === "pro_plus" ? 4 : 2;
 
+    console.log(`verify-payment: verifying tx ${transaction_id} for ${user.email}, tier=${tier}, expectedAmount=${expectedAmount}`);
+
     // Verify the transaction directly with Flutterwave — the only source of truth.
     const flwRes = await fetch(
       `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
       { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
     );
     const flwData = await flwRes.json();
+    // Full response logged so a mismatch (wrong amount, wrong currency,
+    // wrong email, or Flutterwave rejecting the request entirely due to a
+    // bad/missing FLW_SECRET_KEY) is visible instead of a silent 400.
+    console.log("verify-payment: Flutterwave response", JSON.stringify(flwData));
 
     const tx = flwData?.data;
     const isValid =
@@ -80,6 +88,15 @@ Deno.serve(async (req) => {
       tx?.customer?.email?.toLowerCase() === user.email?.toLowerCase();
 
     if (!isValid) {
+      console.error("verify-payment: verification failed", {
+        flwStatus: flwData?.status,
+        txStatus: tx?.status,
+        currency: tx?.currency,
+        amount: tx?.amount,
+        expectedAmount,
+        txEmail: tx?.customer?.email,
+        userEmail: user.email,
+      });
       return new Response(JSON.stringify({ success: false, error: "Transaction could not be verified" }), { status: 400 });
     }
 
@@ -123,6 +140,7 @@ Deno.serve(async (req) => {
     await sendReceiptEmail(tx.customer.email, tier, expectedAmount);
     return new Response(JSON.stringify({ success: true }), { status: 200 });
   } catch (e) {
+    console.error("verify-payment: unhandled exception", e);
     return new Response(JSON.stringify({ success: false, error: String(e) }), { status: 500 });
   }
 });
