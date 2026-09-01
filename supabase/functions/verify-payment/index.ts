@@ -37,12 +37,34 @@ async function sendReceiptEmail(email: string, tier: string, amount: number) {
   }
 }
 
+// Browsers send a preflight OPTIONS request before the real POST whenever
+// a custom header (like our Authorization one) is involved cross-origin.
+// Without handling it explicitly, that OPTIONS request falls straight
+// into the same code as a real request, hits `await req.json()` on an
+// empty body, and crashes — which is exactly what was happening here.
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
   try {
     const { transaction_id, tier: requestedTier } = await req.json();
     if (!transaction_id) {
       console.error("verify-payment: missing transaction_id in request body");
-      return new Response(JSON.stringify({ success: false, error: "Missing transaction_id" }), { status: 400 });
+      return jsonResponse({ success: false, error: "Missing transaction_id" }, 400);
     }
     const tier = requestedTier === "pro_plus" ? "pro_plus" : "pro";
     // Must match TIER_CONFIG in src/components/UpgradeButton.jsx exactly —
@@ -73,7 +95,7 @@ Deno.serve(async (req) => {
       console.error("verify-payment: charge verification failed", {
         flwStatus: flwData?.status, txStatus: tx?.status, currency: tx?.currency, amount: tx?.amount, expectedAmount,
       });
-      return new Response(JSON.stringify({ success: false, error: "Transaction could not be verified" }), { status: 400 });
+      return jsonResponse({ success: false, error: "Transaction could not be verified" }, 400);
     }
 
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
@@ -122,13 +144,10 @@ Deno.serve(async (req) => {
 
     if (!user) {
       console.error("verify-payment: could not identify a user for this payment", { txEmail: tx?.customer?.email });
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Payment verified with Flutterwave, but we couldn't match it to your account. Please contact support with this transaction ID: " + transaction_id,
-        }),
-        { status: 401 }
-      );
+      return jsonResponse({
+        success: false,
+        error: "Payment verified with Flutterwave, but we couldn't match it to your account. Please contact support with this transaction ID: " + transaction_id,
+      }, 401);
     }
 
     console.log(`verify-payment: granting ${tier} to ${user.email} for tx ${transaction_id}`);
@@ -160,19 +179,16 @@ Deno.serve(async (req) => {
         "Payment succeeded but subscription save failed",
         `User ${user.email} paid for ${tier} (tx ${transaction_id}) but the subscriptions upsert failed:\n${JSON.stringify(dbError)}\n\nThis needs manual follow-up — check Flutterwave to confirm the charge, then add their row to the subscriptions table by hand.`
       );
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Payment verified with Flutterwave, but we couldn't save your subscription. Please contact support with this transaction ID: " + transaction_id,
-        }),
-        { status: 500 }
-      );
+      return jsonResponse({
+        success: false,
+        error: "Payment verified with Flutterwave, but we couldn't save your subscription. Please contact support with this transaction ID: " + transaction_id,
+      }, 500);
     }
 
     await sendReceiptEmail(tx.customer.email, tier, expectedAmount);
-    return new Response(JSON.stringify({ success: true }), { status: 200 });
+    return jsonResponse({ success: true }, 200);
   } catch (e) {
     console.error("verify-payment: unhandled exception", e);
-    return new Response(JSON.stringify({ success: false, error: String(e) }), { status: 500 });
+    return jsonResponse({ success: false, error: String(e) }, 500);
   }
 });
