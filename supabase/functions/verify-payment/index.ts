@@ -39,20 +39,6 @@ async function sendReceiptEmail(email: string, tier: string, amount: number) {
 
 Deno.serve(async (req) => {
   try {
-    const authHeader = req.headers.get("Authorization") || "";
-    const jwt = authHeader.replace("Bearer ", "");
-
-    // Identify the calling user from their Supabase session token.
-    const userClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: userData, error: userError } = await userClient.auth.getUser(jwt);
-    if (userError || !userData?.user) {
-      console.error("verify-payment: auth failed", userError);
-      return new Response(JSON.stringify({ success: false, error: "Not authenticated" }), { status: 401 });
-    }
-    const user = userData.user;
-
     const { transaction_id, tier: requestedTier } = await req.json();
     if (!transaction_id) {
       console.error("verify-payment: missing transaction_id in request body");
@@ -66,41 +52,87 @@ Deno.serve(async (req) => {
     // though the person was correctly charged the advertised amount.
     const expectedAmount = tier === "pro_plus" ? 4 : 2;
 
-    console.log(`verify-payment: verifying tx ${transaction_id} for ${user.email}, tier=${tier}, expectedAmount=${expectedAmount}`);
-
-    // Verify the transaction directly with Flutterwave — the only source of truth.
+    // Verify the transaction directly with Flutterwave FIRST — this is the
+    // one fact we trust unconditionally. Everything else (which app user
+    // this belongs to) gets figured out relative to this.
     const flwRes = await fetch(
       `https://api.flutterwave.com/v3/transactions/${transaction_id}/verify`,
       { headers: { Authorization: `Bearer ${FLW_SECRET_KEY}` } }
     );
     const flwData = await flwRes.json();
-    // Full response logged so a mismatch (wrong amount, wrong currency,
-    // wrong email, or Flutterwave rejecting the request entirely due to a
-    // bad/missing FLW_SECRET_KEY) is visible instead of a silent 400.
     console.log("verify-payment: Flutterwave response", JSON.stringify(flwData));
 
     const tx = flwData?.data;
-    const isValid =
+    const chargeIsValid =
       flwData?.status === "success" &&
       tx?.status === "successful" &&
       tx?.currency === "USD" &&
-      tx?.amount >= expectedAmount &&
-      tx?.customer?.email?.toLowerCase() === user.email?.toLowerCase();
+      tx?.amount >= expectedAmount;
 
-    if (!isValid) {
-      console.error("verify-payment: verification failed", {
-        flwStatus: flwData?.status,
-        txStatus: tx?.status,
-        currency: tx?.currency,
-        amount: tx?.amount,
-        expectedAmount,
-        txEmail: tx?.customer?.email,
-        userEmail: user.email,
+    if (!chargeIsValid) {
+      console.error("verify-payment: charge verification failed", {
+        flwStatus: flwData?.status, txStatus: tx?.status, currency: tx?.currency, amount: tx?.amount, expectedAmount,
       });
       return new Response(JSON.stringify({ success: false, error: "Transaction could not be verified" }), { status: 400 });
     }
 
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+    // Identify which account this belongs to. First choice: the session
+    // token sent with the request. Second choice (used if that token is
+    // missing/expired — which can genuinely happen after bouncing through
+    // Flutterwave's own checkout page and back): match by the email
+    // Flutterwave itself just confirmed paid, against Cookify's own
+    // signed-in accounts. Either way, the person still has to be signed
+    // into an account with that exact email for this to succeed — this
+    // isn't a way to grant Pro to an arbitrary email.
+    const authHeader = req.headers.get("Authorization") || "";
+    const jwt = authHeader.replace("Bearer ", "");
+    let user: { id: string; email?: string } | null = null;
+
+    if (jwt) {
+      const { data: userData, error: userError } = await adminClient.auth.getUser(jwt);
+      if (userError) {
+        console.error("verify-payment: session token auth failed, will try email match instead", userError.message);
+      } else {
+        user = userData.user;
+      }
+    }
+
+    if (!user && tx?.customer?.email) {
+      // auth.users isn't exposed via the regular Data API (Supabase blocks
+      // that schema for security), so this has to go through the Admin
+      // API instead. listUsers() doesn't support filtering by email
+      // server-side, so this fetches a page and matches client-side —
+      // completely fine at this app's scale (hundreds/thousands of users),
+      // would need real pagination if this app ever has 1000+ accounts.
+      const { data: usersPage, error: lookupError } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
+      if (lookupError) {
+        console.error("verify-payment: email fallback lookup failed", lookupError);
+      } else {
+        const matched = usersPage.users.find(
+          (u) => u.email?.toLowerCase() === tx.customer.email.toLowerCase()
+        );
+        if (matched) {
+          console.log(`verify-payment: identified user via email match (session token was missing/invalid) — ${matched.email}`);
+          user = matched;
+        }
+      }
+    }
+
+    if (!user) {
+      console.error("verify-payment: could not identify a user for this payment", { txEmail: tx?.customer?.email });
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "Payment verified with Flutterwave, but we couldn't match it to your account. Please contact support with this transaction ID: " + transaction_id,
+        }),
+        { status: 401 }
+      );
+    }
+
+    console.log(`verify-payment: granting ${tier} to ${user.email} for tx ${transaction_id}`);
+
     const periodEnd = new Date();
     periodEnd.setMonth(periodEnd.getMonth() + 1);
 

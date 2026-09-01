@@ -1,5 +1,5 @@
 {
-  "$schema": "https://json.schemastore.org/package",
+  "$schema": "https://json.schemastore.org/package.json",
   "name": "cookify.io",
   "private": true,
   "version": "0.0.0",
