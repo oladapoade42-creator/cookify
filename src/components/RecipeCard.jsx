@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X, CirclePlay, MapPin, Loader2 } from "lucide-react";
 import { supabase } from "../supabase";
 import { moderateText } from "../utils/moderation";
+import { getUserItem } from "../utils/userStorage";
 
 export default function RecipeCard({
   recipeId,
@@ -123,7 +124,7 @@ export default function RecipeCard({
     let cancelled = false;
     supabase
       .from("comments")
-      .select("id, provider, text, created_at, flagged")
+      .select("id, provider, username, text, created_at, flagged")
       .eq("recipe_id", String(recipeId))
       .eq("flagged", false)
       .order("created_at", { ascending: false })
@@ -190,6 +191,7 @@ export default function RecipeCard({
       recipe_id: String(recipeId),
       user_id: authUser?.id || null,
       provider: authProvider,
+      username: getUserItem(authUser, "cookify_username") || null,
       text,
       flagged,
       flag_reason: flagged ? reason : null,
@@ -537,10 +539,10 @@ export default function RecipeCard({
                   comments.map((c) => (
                     <div key={c.id} className="flex gap-3">
                       <div className="h-9 w-9 shrink-0 rounded-full bg-white/10 border border-white/10 grid place-items-center text-xs font-bold text-white uppercase">
-                        {c.provider?.[0] || "?"}
+                        {(c.username || c.provider)?.[0] || "?"}
                       </div>
                       <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide">{c.provider}</p>
+                        <p className="text-xs text-gray-500 uppercase tracking-wide">{c.username || c.provider || "Guest"}</p>
                         <p className="text-sm text-gray-200 mt-0.5">{c.text}</p>
                       </div>
                     </div>
