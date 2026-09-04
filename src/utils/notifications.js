@@ -21,6 +21,7 @@ const IDS = {
   dinner: 2003,
   dietPlan: 3001,
   confirmation: 9001,
+  streak: 4001,
 };
 
 // Fires a one-off notification right away — used only to confirm a
@@ -230,5 +231,49 @@ export async function disableDietPlanReminder() {
     await LocalNotifications.cancel({ notifications: [{ id: IDS.dietPlan }] });
   } else if (webMealTimeouts.dietPlan) {
     clearTimeout(webMealTimeouts.dietPlan);
+  }
+}
+
+// ---------------- Streak expiry warning (one-off, rescheduled every open) ----------------
+
+let webStreakTimeout = null;
+
+// Fires once, right around the moment the streak would actually expire
+// (24h after the last open) — not a repeating reminder. Call this again
+// every time the app opens (with the fresh lastOpenedAt) so it always
+// points at the *current* deadline instead of an old one.
+export async function scheduleStreakExpiryWarning(lastOpenedAt) {
+  const granted = await requestNotificationPermission();
+  if (!granted) return false;
+
+  const fireAt = new Date(lastOpenedAt + 24 * 60 * 60 * 1000);
+  const title = "Don't let your streak end 😭🔥";
+  const body = "Open Cookify in the next few minutes to keep your streak alive.";
+
+  if (isNative()) {
+    await LocalNotifications.cancel({ notifications: [{ id: IDS.streak }] });
+    if (fireAt.getTime() <= Date.now()) return true; // already past — nothing to schedule
+    await LocalNotifications.schedule({
+      notifications: [{ id: IDS.streak, title, body, schedule: { at: fireAt } }],
+    });
+  } else {
+    if (webStreakTimeout) clearTimeout(webStreakTimeout);
+    const msUntilFire = fireAt.getTime() - Date.now();
+    if (msUntilFire <= 0) return true;
+    webStreakTimeout = setTimeout(() => {
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification(title, { body });
+      }
+    }, msUntilFire);
+  }
+  return true;
+}
+
+export async function cancelStreakExpiryWarning() {
+  if (isNative()) {
+    await LocalNotifications.cancel({ notifications: [{ id: IDS.streak }] });
+  } else if (webStreakTimeout) {
+    clearTimeout(webStreakTimeout);
+    webStreakTimeout = null;
   }
 }

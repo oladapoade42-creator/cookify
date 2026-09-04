@@ -97,6 +97,7 @@ export default function AI({ callGeminiApi, isPremium, tier, authUser, onUpgrade
               ? "Upgrade to Cookify Pro+ for unlimited AI Chef questions."
               : "Upgrade to Cookify Pro for 25/day, or Pro+ for unlimited."}
           </p>
+          <p className="mt-1 text-xs text-gray-500">Both plans also include ad-free browsing for your first month.</p>
           <div className="mt-4 flex flex-col gap-2">
             {tier !== "pro" && tier !== "pro_plus" && (
               <UpgradeButton

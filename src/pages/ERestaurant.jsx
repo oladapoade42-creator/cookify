@@ -142,6 +142,27 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
     } catch (e) {}
   }
 
+  // These two give the BUYER a say in whether an order actually happened
+  // — previously only the seller could set order status at all, meaning
+  // a seller could mark "Delivered" regardless of whether anything was
+  // actually sent, with the buyer having no way to push back in-app.
+  async function confirmDelivery(orderId) {
+    try {
+      await supabase.from("orders").update({ buyer_confirmed: true }).eq("id", orderId);
+      loadMyOrders();
+    } catch (e) {}
+  }
+
+  async function reportOrderProblem(orderId) {
+    const reason = window.prompt("What happened? (e.g. never arrived, wrong item, seller unresponsive)");
+    if (!reason || !reason.trim()) return;
+    try {
+      await supabase.from("orders").update({ disputed: true, dispute_reason: reason.trim() }).eq("id", orderId);
+      loadMyOrders();
+      alert("Reported. This has been flagged for review.");
+    } catch (e) {}
+  }
+
   function handleImageFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -262,6 +283,33 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
                     />
                   ))}
                 </div>
+
+                {o.disputed ? (
+                  <p className="mt-3 text-xs font-bold uppercase tracking-wide text-rose-400">
+                    Reported — under review
+                  </p>
+                ) : o.buyer_confirmed ? (
+                  <p className="mt-3 text-xs font-bold uppercase tracking-wide text-emerald-400">
+                    You confirmed this order ✓
+                  </p>
+                ) : (
+                  <div className="mt-3 flex gap-2">
+                    {o.status === "delivered" && (
+                      <button
+                        onClick={() => confirmDelivery(o.id)}
+                        className="flex-1 rounded-xl bg-white py-2 text-xs font-bold uppercase tracking-wide text-black"
+                      >
+                        I received this
+                      </button>
+                    )}
+                    <button
+                      onClick={() => reportOrderProblem(o.id)}
+                      className="flex-1 rounded-xl border border-rose-500/30 bg-rose-500/10 py-2 text-xs font-bold uppercase tracking-wide text-rose-300"
+                    >
+                      Report a problem
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -327,6 +375,11 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
                 <p>Bank: {sellerProfile.seller_bank_name}</p>
                 <p>Account Name: {sellerProfile.seller_account_name}</p>
                 <p>Account Number: {sellerProfile.seller_account_number}</p>
+                <p className="pt-2 text-xs text-amber-300/90">
+                  Cookify doesn't process this payment — you're transferring directly to the seller's bank
+                  account. Only pay sellers you trust, and use "Report a problem" on your order if anything
+                  seems off.
+                </p>
               </div>
             ) : (
               <p className="mt-3 text-xs text-gray-500">This seller hasn't added payment details yet.</p>

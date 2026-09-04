@@ -22,6 +22,7 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
   const admin = isAdmin(authUser);
   const [flaggedComments, setFlaggedComments] = useState([]);
   const [flaggedListings, setFlaggedListings] = useState([]);
+  const [disputedOrders, setDisputedOrders] = useState([]);
 
   useEffect(() => {
     if (!admin) return;
@@ -29,6 +30,8 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
       .order("created_at", { ascending: false }).then(({ data }) => setFlaggedComments(data || []));
     supabase.from("food_listings").select("id, title, description, flag_reason, created_at").eq("flagged", true)
       .order("created_at", { ascending: false }).then(({ data }) => setFlaggedListings(data || []));
+    supabase.from("orders").select("id, seller_id, buyer_id, dispute_reason, created_at").eq("disputed", true)
+      .order("created_at", { ascending: false }).then(({ data }) => setDisputedOrders(data || []));
   }, [admin]);
 
   const approveComment = async (id) => {
@@ -46,6 +49,20 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
   const deleteListing = async (id) => {
     await supabase.from("food_listings").delete().eq("id", id);
     setFlaggedListings((prev) => prev.filter((l) => l.id !== id));
+  };
+  // "Resolve" just clears the dispute flag — it's on you to actually
+  // follow up with the buyer/seller (refund, warn, suspend the seller's
+  // listings) before clicking this; it doesn't do any of that itself.
+  const resolveDispute = async (id) => {
+    await supabase.from("orders").update({ disputed: false }).eq("id", id);
+    setDisputedOrders((prev) => prev.filter((o) => o.id !== id));
+  };
+  // Removes every listing from a seller who's been confirmed scamming —
+  // the fastest way to stop them taking more orders.
+  const suspendSeller = async (sellerId) => {
+    if (!window.confirm("Hide every listing from this seller? This can be undone manually in Supabase later.")) return;
+    await supabase.from("food_listings").update({ is_visible: false }).eq("seller_id", sellerId);
+    alert("That seller's listings are now hidden.");
   };
 
   useEffect(() => {
@@ -254,7 +271,7 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
           </div>
         </section>
 
-        {admin && (flaggedComments.length > 0 || flaggedListings.length > 0) && (
+        {admin && (flaggedComments.length > 0 || flaggedListings.length > 0 || disputedOrders.length > 0) && (
           <section className="rounded-3xl border border-amber-500/20 bg-amber-500/5 p-5">
             <div className="flex items-center gap-2 mb-3">
               <ShieldAlert className="h-4 w-4 text-amber-300" />
@@ -287,6 +304,22 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
                   </button>
                   <button onClick={() => deleteListing(l.id)} className="flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-300">
                     <Trash2 className="h-3 w-3" /> Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {disputedOrders.map((o) => (
+              <div key={o.id} className="mb-3 rounded-2xl border border-rose-500/20 bg-black/40 p-3">
+                <p className="text-sm font-bold text-white/90">E-Restaurant order dispute</p>
+                <p className="text-xs text-white/60">Buyer: {o.buyer_id} · Seller: {o.seller_id}</p>
+                <p className="mt-1 text-xs text-amber-300/80">Reason: {o.dispute_reason || "unspecified"}</p>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={() => resolveDispute(o.id)} className="flex items-center gap-1 rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-white">
+                    <Check className="h-3 w-3" /> Mark resolved
+                  </button>
+                  <button onClick={() => suspendSeller(o.seller_id)} className="flex items-center gap-1 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs text-rose-300">
+                    <Trash2 className="h-3 w-3" /> Suspend seller
                   </button>
                 </div>
               </div>

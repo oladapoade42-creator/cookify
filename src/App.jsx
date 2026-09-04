@@ -11,11 +11,13 @@ import Home from './pages/Home';
 import Favorites from './pages/Favorites';
 import Settings from './pages/Settings';
 import ERestaurant from './pages/ERestaurant';
-import UpgradeButton from './components/UpgradeButton';
+import StreakMilestoneModal from './components/StreakMilestoneModal';
+import PaywallModal from './components/PaywallModal';
 import { getUserItem, setUserItem, migrateAllLegacyKeys } from './utils/userStorage';
 import React, { useState, useEffect } from 'react';
 import { initAds } from './utils/ads';
-import { enableWaterReminders, enableMealReminders } from './utils/notifications';
+import { enableWaterReminders, enableMealReminders, scheduleStreakExpiryWarning } from './utils/notifications';
+import { touchStreakOnOpen } from './utils/streak';
 import {
   ChefHat,
   BookOpen,
@@ -31,6 +33,7 @@ import {
   LogOut,
   House,
   Heart,
+  Crown,
   X,
 } from 'lucide-react';
 
@@ -133,6 +136,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [xp, setXp] = useState(0);
   const [streak, setStreak] = useState(0);
+  const [streakMilestone, setStreakMilestone] = useState(null); // number | null — set to trigger the fire celebration overlay
+  const [showPaywall, setShowPaywall] = useState(false);
   const [cookedCount, setCookedCount] = useState(0);
   const [cookedRecipesList, setCookedRecipesList] = useState([]);
   const [isPremium, setIsPremium] = useState(false);
@@ -185,23 +190,21 @@ export default function App() {
         if (storedList) {
           try { setCookedRecipesList(JSON.parse(storedList)); } catch (e) {}
         }
-
-        // Streak logic: only keep the streak alive if the user was last
-        // active yesterday or today. Otherwise it resets.
-        const today = new Date().toDateString();
-        const lastActive = progress.lastActiveDate;
-        if (lastActive === today) {
-          setStreak(progress.streak ?? 0);
-        } else if (lastActive) {
-          const daysSince = Math.round((new Date(today) - new Date(lastActive)) / 86400000);
-          setStreak(daysSince === 1 ? (progress.streak ?? 0) : 0);
-        } else {
-          setStreak(0);
-        }
       } catch (e) {
         // ignore corrupted data
       }
     }
+
+    // Streak: driven purely by opening the app within a rolling 24h
+    // window of the last open (not by cooking/trivia, and not calendar
+    // days). Touches once per mount/account-switch, updates the streak
+    // count, reschedules the "don't lose your streak" notification for
+    // the new deadline, and flags a milestone celebration if this open
+    // just hit one.
+    const { streak: newStreak, milestoneHit, lastOpenedAt } = touchStreakOnOpen(authUser);
+    setStreak(newStreak);
+    scheduleStreakExpiryWarning(lastOpenedAt);
+    if (milestoneHit) setStreakMilestone(newStreak);
   }, [authUser?.id]);
 
   useEffect(() => {
@@ -242,12 +245,12 @@ export default function App() {
   };
 
   // Called whenever the AI tutor is activated for a recipe.
-  // This is what actually drives XP, streak, and the "Recipes Cooked" list —
-  // XP/streak only fire the first time a given recipe is opened, so
-  // reopening the same dish repeatedly doesn't farm XP.
+  // This is what actually drives XP and the "Recipes Cooked" list — XP
+  // only fires the first time a given recipe is opened, so reopening the
+  // same dish repeatedly doesn't farm XP. Streak is handled separately,
+  // driven by daily app opens (see touchStreakOnOpen), not by cooking.
   const handleRecipeCooked = (recipe) => {
     if (!recipe) return;
-    const today = new Date().toDateString();
     const alreadyLogged = cookedRecipesList.some((r) => r.id === recipe.id);
 
     setCookedRecipesList((prev) => {
@@ -262,18 +265,11 @@ export default function App() {
       return next;
     });
 
-    if (alreadyLogged) return; // no XP/streak farming from reopening the same recipe
+    if (alreadyLogged) return; // no XP farming from reopening the same recipe
 
     setXp((prev) => {
       const next = prev + 30;
       persistProgress({ xp: next });
-      return next;
-    });
-    setStreak((prev) => {
-      const stored = JSON.parse(getUserItem(authUser, 'cookify_progress') || '{}');
-      const lastActive = stored.lastActiveDate;
-      const next = lastActive === today ? prev : prev + 1;
-      persistProgress({ streak: next, lastActiveDate: today });
       return next;
     });
   };
@@ -292,7 +288,6 @@ export default function App() {
     const answersToday = stored.dailyChallengeDate === now ? (stored.dailyChallengeAnswers || {}) : {};
     if (answersToday[slot] !== undefined) return; // already answered this slot today
 
-    const isFirstSlotToday = Object.keys(answersToday).length === 0;
     const nextAnswers = { ...answersToday, [slot]: wasCorrect };
     persistProgress({ dailyChallengeDate: now, dailyChallengeAnswers: nextAnswers });
 
@@ -300,15 +295,6 @@ export default function App() {
       setXp((prev) => {
         const next = prev + 20;
         persistProgress({ xp: next });
-        return next;
-      });
-    }
-
-    if (isFirstSlotToday) {
-      setStreak((prev) => {
-        const lastActive = stored.lastActiveDate;
-        const next = lastActive === now ? prev : prev + 1;
-        persistProgress({ streak: next, lastActiveDate: now });
         return next;
       });
     }
@@ -373,7 +359,18 @@ export default function App() {
           >
             <Sparkles className="w-4 h-4" />
           </button>
-          <UpgradeButton authUser={authUser} currentTier={tier} tier="pro" onUpgraded={upgradeToPro} compact />
+          <button
+            onClick={() => setShowPaywall(true)}
+            aria-label={isPremium ? `${tier === 'pro_plus' ? 'Cookify Pro+' : 'Cookify Pro'} active` : 'See Cookify Pro benefits'}
+            title={isPremium ? `${tier === 'pro_plus' ? 'Cookify Pro+' : 'Cookify Pro'} active` : 'See Cookify Pro benefits'}
+            className={`p-2 rounded-full border transition ${
+              isPremium
+                ? "bg-white/90 text-black border-white/30"
+                : "bg-white/10 text-white border-white/15 hover:bg-white/20"
+            }`}
+          >
+            <Crown className="w-4 h-4" />
+          </button>
         </div>
       </header>
       {/* Main Content Area */}
@@ -396,6 +393,7 @@ export default function App() {
               callGeminiApi={callGeminiApi}
               onOrderNow={(listingId) => { setOpenListingId(listingId); setActiveTab('restaurant'); }}
               authUser={authUser}
+              isPremium={isPremium}
               tier={tier}
             />
           )}
@@ -437,6 +435,19 @@ export default function App() {
 
       {/* Bottom Navigation */}
       <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+
+      {streakMilestone && (
+        <StreakMilestoneModal streak={streakMilestone} onClose={() => setStreakMilestone(null)} />
+      )}
+
+      {showPaywall && (
+        <PaywallModal
+          authUser={authUser}
+          tier={tier}
+          onUpgraded={(newTier) => { upgradeToPro(newTier); setShowPaywall(false); }}
+          onSkip={() => setShowPaywall(false)}
+        />
+      )}
     </div>
   );
 }
