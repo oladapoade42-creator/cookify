@@ -70,6 +70,29 @@ Deno.serve(async (req: Request) => {
   }
 
   if (event === "subscription.cancelled" || (event === "charge.completed" && data.status === "failed")) {
+    // Guard against exactly the bug that likely just bit us: Flutterwave
+    // can retry/redeliver a webhook for an OLD failed attempt (from
+    // earlier testing, or a genuine transient failure) well after a
+    // later payment already succeeded. Blindly matching by email and
+    // downgrading would wipe out a currently-active, correctly-paid
+    // subscription because of an unrelated stale event. So: only accept
+    // this as real if it's newer than the last time we touched this
+    // subscription row — an old replayed event can never be newer than
+    // that.
+    const { data: existing } = await admin
+      .from("subscriptions")
+      .select("updated_at")
+      .eq("flw_customer_email", email)
+      .maybeSingle();
+
+    const eventTime = data.created_at ? new Date(data.created_at).getTime() : Date.now();
+    const lastUpdateTime = existing?.updated_at ? new Date(existing.updated_at).getTime() : 0;
+
+    if (existing && eventTime <= lastUpdateTime) {
+      console.log(`flutterwave-webhook: ignoring stale ${event} for ${email} — event is older than the subscription's last update`);
+      return new Response("ok (stale event ignored)", { status: 200 });
+    }
+
     const { error } = await admin
       .from("subscriptions")
       .update({ status: "inactive", updated_at: new Date().toISOString() })
