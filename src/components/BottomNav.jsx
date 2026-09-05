@@ -20,7 +20,7 @@ export default function BottomNav({
   ];
 
   return (
-    <nav className="sticky bottom-0 z-30 bg-black/70 backdrop-blur-2xl border-t border-white/10 px-2 py-2">
+    <nav className="sticky bottom-0 z-30 bg-black/70 backdrop-blur-md border-t border-white/10 px-2 py-2">
       <div className="flex items-center gap-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -29,7 +29,7 @@ export default function BottomNav({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-1 min-w-0 flex-col items-center gap-0.5 rounded-2xl px-1 py-2 transition-all duration-200 backdrop-blur-xl ${
+              className={`flex flex-1 min-w-0 flex-col items-center gap-0.5 rounded-2xl px-1 py-2 transition-all duration-200 ${
                 isActive
                   ? 'bg-white/90 text-black shadow-[0_8px_24px_rgba(255,255,255,0.18)]'
                   : 'text-gray-400 hover:bg-white/10 hover:text-white'

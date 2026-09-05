@@ -1,4 +1,5 @@
 import React from "react";
+import { EmptyPlateDoodle } from "../components/EmptyStateDoodles";
 
 export default function Favorites({ favorites = [], onRemoveFavorite }) {
   return (
@@ -15,6 +16,7 @@ export default function Favorites({ favorites = [], onRemoveFavorite }) {
 
       {favorites.length === 0 ? (
         <div className="rounded-[32px] border border-dashed border-white/10 bg-white/5 p-8 text-center text-gray-300">
+          <EmptyPlateDoodle className="mx-auto mb-4 w-20 h-20 text-white/40" />
           <p className="mb-3 text-lg font-semibold text-white">No favorites yet</p>
           <p className="text-sm text-gray-400">Tap Save Recipe on any dish to build your favorites list.</p>
         </div>
@@ -22,7 +24,7 @@ export default function Favorites({ favorites = [], onRemoveFavorite }) {
         <div className="space-y-6">
           {favorites.map((recipe) => (
             <div key={recipe.id} className="grid gap-4 rounded-[32px] border border-white/10 bg-slate-950/70 p-5 sm:grid-cols-[170px_minmax(0,1fr)]">
-              <img src={recipe.image} alt={recipe.title} className="h-40 w-full rounded-[24px] object-cover" />
+              <img src={recipe.image} alt={recipe.title} loading="lazy" decoding="async" className="h-40 w-full rounded-[24px] object-cover" />
               <div className="flex flex-col justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-black text-white">{recipe.title}</h2>

@@ -206,6 +206,12 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   const viewedThisSessionRef = useRef(new Set());
   // AI Tutor state
   const [tutorOpen, setTutorOpen] = useState(false);
+  // Async Gemini replies (below) resolve after an arbitrary delay — by
+  // then the `tutorOpen` state value captured in that closure could be
+  // stale (e.g. the person already closed the tutor). This ref is always
+  // current, so those callbacks can check "is the tutor actually still
+  // open right now" instead of "was it open when this request started".
+  const tutorOpenRef = useRef(false);
   const [tutorMessages, setTutorMessages] = useState([]); // {role:'user'|'assistant', text}
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isRecognizing, setIsRecognizing] = useState(false);
@@ -451,6 +457,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   const openTutorForMeal = async (meal) => {
     if (!meal) return;
     setTutorOpen(true);
+    tutorOpenRef.current = true;
     setTutorMessages([]);
     onRecipeCooked?.(meal);
     await startTutorSession(meal);
@@ -462,6 +469,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     const mealCategory = meal.category || meal.difficulty || 'recipe';
     const introPrompt = `You are an expert, friendly cooking tutor. The user selected the meal: ${mealName} (from ${mealArea}, category: ${mealCategory}). Provide a concise, numbered step-by-step cooking guide for preparing this dish. After the steps, offer to guide the user step-by-step interactively. Keep language simple and encouraging.`;
     const assistantReply = await sendPromptToGemini(introPrompt);
+    if (!tutorOpenRef.current) return; // closed while Gemini was replying — don't speak into a closed tutor
     pushTutorMessage({ role: 'assistant', text: assistantReply });
     speakText(assistantReply);
   };
@@ -544,6 +552,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
       const spoken = ev.results[0][0].transcript;
       pushTutorMessage({ role: 'user', text: spoken });
       const reply = await sendPromptToGemini(`User said: "${spoken}"\nPlease respond as the cooking tutor, helpful and concise.`);
+      if (!tutorOpenRef.current) return; // closed while Gemini was replying
       pushTutorMessage({ role: 'assistant', text: reply });
       speakText(reply);
     };
@@ -561,6 +570,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
   }
 
   function closeTutor() {
+    tutorOpenRef.current = false;
     stopSpeaking();
     setIsSpeaking(false);
     setTutorOpen(false);
@@ -581,6 +591,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
     if (!manualMessage.trim()) return;
     pushTutorMessage({ role: 'user', text: manualMessage });
     const reply = await sendPromptToGemini(`User asked: "${manualMessage}"\nRespond as a friendly cooking tutor, concise and actionable.`);
+    if (!tutorOpenRef.current) { setManualMessage(''); return; } // closed while Gemini was replying
     pushTutorMessage({ role: 'assistant', text: reply });
     speakText(reply);
     setManualMessage('');
@@ -973,7 +984,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
             {foodListings.map((listing) => (
               <div key={listing.id} className="shrink-0 w-40 rounded-3xl border border-white/10 bg-zinc-900/80 overflow-hidden">
                 {listing.image ? (
-                  <img src={listing.image} alt={listing.title} className="h-24 w-full object-cover" />
+                  <img src={listing.image} alt={listing.title} loading="lazy" decoding="async" className="h-24 w-full object-cover" />
                 ) : (
                   <div className="h-24 w-full bg-white/5 flex items-center justify-center"><ChefHat className="text-white/30 h-6 w-6" /></div>
                 )}
@@ -1062,7 +1073,7 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
                 onClick={() => handleSelectMeal(m)}
                 className="w-full flex items-center gap-3 p-3 rounded-[20px] hover:bg-white/5 text-left"
               >
-                <img src={m.image} alt={m.name} className="w-12 h-12 rounded-md object-cover" />
+                <img src={m.image} alt={m.name} loading="lazy" decoding="async" className="w-12 h-12 rounded-md object-cover" />
                 <div>
                   <div className="font-semibold text-white">{m.name}</div>
                   <div className="text-xs text-gray-400">{m.area} • {m.category}</div>

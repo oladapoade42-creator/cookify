@@ -298,7 +298,7 @@ export default function Learn() {
               <div key={i} className="flex items-center gap-4 rounded-2xl border border-white/10 bg-zinc-900/80 p-4">
                 <span className="text-2xl font-black text-white/30 w-6">{i + 1}</span>
                 {dish.image && (
-                  <img src={dish.image} alt={dish.dish_name} className="w-12 h-12 rounded-lg object-cover" />
+                  <img src={dish.image} alt={dish.dish_name} loading="lazy" decoding="async" className="w-12 h-12 rounded-lg object-cover" />
                 )}
                 <div className="flex-1">
                   <p className="font-bold">{dish.dish_name}</p>

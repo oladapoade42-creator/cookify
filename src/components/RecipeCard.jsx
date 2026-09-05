@@ -3,6 +3,8 @@ import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X, CirclePla
 import { supabase } from "../supabase";
 import { moderateText } from "../utils/moderation";
 import { getUserItem } from "../utils/userStorage";
+import { haversineKm, getCurrentPosition } from "../utils/geo";
+import { EmptyChatDoodle, EmptyMapDoodle } from "./EmptyStateDoodles";
 
 export default function RecipeCard({
   recipeId,
@@ -234,18 +236,43 @@ export default function RecipeCard({
       const sellerIds = [...new Set(listings.map((l) => l.seller_id))];
       const { data: sellerProfiles } = await supabase
         .from("profiles")
-        .select("user_id, seller_address")
+        .select("user_id, seller_address, seller_lat, seller_lng")
         .in("user_id", sellerIds);
 
-      const addressBySeller = Object.fromEntries((sellerProfiles || []).map((p) => [p.user_id, p.seller_address]));
+      const profileBySeller = Object.fromEntries((sellerProfiles || []).map((p) => [p.user_id, p]));
 
-      setWhereToBuyResults(
-        listings.map((l) => ({ ...l, address: addressBySeller[l.seller_id] || null }))
-      );
+      // Ask for location so results can actually be sorted "near them" —
+      // resolves to null (never throws) if denied/unavailable, and the
+      // feature still works fine without it, just unsorted.
+      const myLocation = await getCurrentPosition();
+
+      const withDistance = listings.map((l) => {
+        const profile = profileBySeller[l.seller_id];
+        let distanceKm = null;
+        if (myLocation && profile?.seller_lat && profile?.seller_lng) {
+          distanceKm = haversineKm(myLocation.lat, myLocation.lng, profile.seller_lat, profile.seller_lng);
+        }
+        return { ...l, address: profile?.seller_address || null, distanceKm };
+      });
+
+      withDistance.sort((a, b) => {
+        if (a.distanceKm == null) return 1; // unknown distance sinks to the bottom
+        if (b.distanceKm == null) return -1;
+        return a.distanceKm - b.distanceKm;
+      });
+
+      setWhereToBuyResults(withDistance);
     } catch (e) {
       setWhereToBuyResults([]);
+    } finally {
+      // This was previously after the try block instead of in a finally,
+      // so the "no listings found" early return above skipped it
+      // entirely — the spinner would stay stuck on forever whenever a
+      // dish had zero matching sellers, which for a new app is most of
+      // the time. finally always runs, on every path out of this
+      // function, so that's no longer possible.
+      setLoadingWhereToBuy(false);
     }
-    setLoadingWhereToBuy(false);
   };
 
   const directionsUrl = (address) =>
@@ -325,7 +352,7 @@ export default function RecipeCard({
         <div className="relative">
           <button
             onClick={(ev) => { ev.stopPropagation(); setMenuOpen((v) => !v); }}
-            className="rounded-full border border-white/10 bg-white/5 backdrop-blur-xl p-2 text-white transition hover:bg-white/10"
+            className="rounded-full border border-white/10 bg-white/10 p-2 text-white transition hover:bg-white/20"
           >
             <MoreHorizontal className="w-5 h-5" />
           </button>
@@ -351,7 +378,7 @@ export default function RecipeCard({
         </div>
       </div>
 
-      <img src={image} alt={title} className="w-full h-[380px] object-cover" />
+      <img src={image} alt={title} loading="lazy" decoding="async" className="w-full h-[380px] object-cover" />
 
       <div className="space-y-4 p-5">
         <div className="flex flex-wrap items-center gap-3 text-gray-400 text-xs uppercase tracking-[0.35em]">
@@ -372,14 +399,14 @@ export default function RecipeCard({
               <button
                 onClick={handleLike}
                 disabled={likeBusy}
-                className={`rounded-full p-2 backdrop-blur-xl transition disabled:opacity-60 ${liked ? "bg-rose-500/20 text-rose-400" : "bg-white/5 text-white hover:bg-white/10"} ${!canLike ? "opacity-70" : ""}`}
+                className={`rounded-full p-2 transition disabled:opacity-60 ${liked ? "bg-rose-500/20 text-rose-400" : "bg-white/10 text-white hover:bg-white/20"} ${!canLike ? "opacity-70" : ""}`}
               >
                 <Heart className={`w-4 h-4 ${liked ? "fill-current" : ""}`} />
               </button>
               <span className="pr-1 text-sm text-gray-300">{likeCount}</span>
             </div>
             <div className="flex items-center gap-2 rounded-full bg-white/5 px-2 py-1.5">
-              <button onClick={handleComment} className="rounded-full p-2 bg-white/5 backdrop-blur-xl text-white transition hover:bg-white/10">
+              <button onClick={handleComment} className="rounded-full p-2 bg-white/10 text-white transition hover:bg-white/20">
                 <MessageSquare className="w-4 h-4" />
               </button>
               <button
@@ -390,7 +417,7 @@ export default function RecipeCard({
               </button>
             </div>
             <div className="relative flex items-center gap-2 rounded-full bg-white/5 px-2 py-1.5">
-              <button onClick={handleShare} className="rounded-full p-2 bg-white/5 backdrop-blur-xl text-white transition hover:bg-white/10">
+              <button onClick={handleShare} className="rounded-full p-2 bg-white/10 text-white transition hover:bg-white/20">
                 <Share2 className="w-4 h-4" />
               </button>
               <span className="pr-1 text-sm text-gray-300">{shareCount}</span>
@@ -404,7 +431,7 @@ export default function RecipeCard({
               )}
             </div>
           </div>
-          <button onClick={(ev) => { ev.stopPropagation(); onSaveRecipe?.(); }} className="rounded-full border border-white/10 bg-white/5 backdrop-blur-xl px-4 py-2 text-xs uppercase tracking-[0.35em] text-white transition hover:bg-white/10">
+          <button onClick={(ev) => { ev.stopPropagation(); onSaveRecipe?.(); }} className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs uppercase tracking-[0.35em] text-white transition hover:bg-white/20">
             Save Recipe
           </button>
         </div>
@@ -489,7 +516,10 @@ export default function RecipeCard({
                       <div key={r.id} className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/40 p-3">
                         <div>
                           <p className="text-sm font-bold text-white">{r.title}</p>
-                          <p className="text-xs text-gray-400">{r.seller_name || "Cookify Seller"} • ${r.price}</p>
+                          <p className="text-xs text-gray-400">
+                            {r.seller_name || "Cookify Seller"} • ${r.price}
+                            {r.distanceKm != null && ` • ${r.distanceKm.toFixed(1)}km away`}
+                          </p>
                         </div>
                         {r.address ? (
                           <a
@@ -507,7 +537,10 @@ export default function RecipeCard({
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-400">No Cookify sellers currently list this dish. Check E-Restaurant to see everything on offer.</p>
+                  <div className="py-4 text-center">
+                    <EmptyMapDoodle className="mx-auto mb-2 w-16 h-16 text-white/30" />
+                    <p className="text-sm text-gray-400">No Cookify sellers currently list this dish. Check E-Restaurant to see everything on offer.</p>
+                  </div>
                 )}
               </div>
             )}
@@ -534,7 +567,10 @@ export default function RecipeCard({
 
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {comments.length === 0 ? (
-                  <p className="text-sm text-gray-500 text-center py-6">No comments yet — be the first.</p>
+                  <div className="py-6 text-center">
+                    <EmptyChatDoodle className="mx-auto mb-2 w-16 h-16 text-white/30" />
+                    <p className="text-sm text-gray-500">No comments yet — be the first.</p>
+                  </div>
                 ) : (
                   comments.map((c) => (
                     <div key={c.id} className="flex gap-3">

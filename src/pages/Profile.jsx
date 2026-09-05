@@ -15,6 +15,7 @@ import UpgradeButton from "../components/UpgradeButton";
 import { getUserItem, setUserItem } from "../utils/userStorage";
 import { findAvailableUsername, isUsernameAvailable, nameFromAuthUser, slugifyUsername } from "../utils/username";
 import { getNextWaterReminderTime, rollWaterReminderForward } from "../utils/notifications";
+import { EmptyBowlDoodle } from "../components/EmptyStateDoodles";
 
 const ACCENT_COLORS = [
   { name: "White", value: "#ffffff" },
@@ -480,9 +481,12 @@ export default function Profile({
           </div>
 
           {dietPlans.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              Diet plans you save from Scan Food → Diet Plan will show up here, with reminders and the ingredients you'll need.
-            </p>
+            <div className="py-2 text-center">
+              <EmptyBowlDoodle className="mx-auto mb-3 w-16 h-16 text-white/30" />
+              <p className="text-sm text-gray-500">
+                Diet plans you save from Scan Food → Diet Plan will show up here, with reminders and the ingredients you'll need.
+              </p>
+            </div>
           ) : (
             <div className="space-y-3">
               {dietPlans.map((plan) => (
@@ -574,7 +578,7 @@ export default function Profile({
                 {cookedRecipesList.map((r) => (
                   <div key={r.id} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 p-3">
                     {r.image ? (
-                      <img src={r.image} alt={r.title} className="h-12 w-12 rounded-xl object-cover" />
+                      <img src={r.image} alt={r.title} loading="lazy" decoding="async" className="h-12 w-12 rounded-xl object-cover" />
                     ) : (
                       <div className="h-12 w-12 rounded-xl bg-white/10 flex items-center justify-center">
                         <ChefHat className="h-5 w-5 text-white/40" />

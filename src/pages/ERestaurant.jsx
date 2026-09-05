@@ -3,6 +3,7 @@ import { Plus, MapPin, X, ShoppingBag, Loader2, ChefHat } from "lucide-react";
 import { supabase } from "../supabase";
 import { getUserItem } from "../utils/userStorage";
 import { moderateText } from "../utils/moderation";
+import { haversineKm } from "../utils/geo";
 
 const ORDER_STAGES = ["pending", "preparing", "out_for_delivery", "delivered"];
 const STAGE_LABELS = {
@@ -103,16 +104,6 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
     } catch (e) {
       setSellerProfile(null);
     }
-  }
-
-  function haversineKm(lat1, lon1, lat2, lon2) {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
   }
 
   async function placeOrder() {
@@ -245,7 +236,7 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
           {listings.map((listing) => (
             <div key={listing.id} className="rounded-3xl border border-white/10 bg-zinc-900/80 overflow-hidden">
               {listing.image ? (
-                <img src={listing.image} alt={listing.title} className="h-28 w-full object-cover" />
+                <img src={listing.image} alt={listing.title} loading="lazy" decoding="async" className="h-28 w-full object-cover" />
               ) : (
                 <div className="h-28 w-full bg-white/5 flex items-center justify-center"><ChefHat className="text-white/30" /></div>
               )}
