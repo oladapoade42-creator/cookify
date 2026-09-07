@@ -16,6 +16,8 @@ import PaywallModal from './components/PaywallModal';
 import { getUserItem, setUserItem, migrateAllLegacyKeys } from './utils/userStorage';
 import React, { useState, useEffect } from 'react';
 import { initAds } from './utils/ads';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { enableWaterReminders, enableMealReminders, scheduleStreakExpiryWarning } from './utils/notifications';
 import { touchStreakOnOpen } from './utils/streak';
 import {
@@ -48,6 +50,30 @@ export default function App() {
     // native Android/iOS app build. Preloads the first interstitial too,
     // so one's ready the first time someone exits a recipe.
     initAds();
+  }, []);
+
+  // Catches the io.cookify.app://auth-callback deep link Google sign-in
+  // redirects to on native (see signInWithOAuth's redirectTo above) and
+  // manually finishes the session — this doesn't happen automatically
+  // the way it does on a normal web page load, since a deep link isn't
+  // a browser navigation Supabase's client can detect on its own.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const sub = CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
+      if (!url || !url.startsWith('io.cookify.app://auth-callback')) return;
+      try {
+        const code = new URL(url).searchParams.get('code');
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) console.error('[Cookify] Failed to complete sign-in from deep link:', error.message);
+        }
+      } catch (e) {
+        console.error('[Cookify] Error handling auth deep link:', e);
+      }
+    });
+
+    return () => { sub.then((s) => s.remove()); };
   }, []);
 
   // Authentication State
@@ -86,10 +112,20 @@ export default function App() {
     }
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
-      // Without this, Google silently reuses whatever Google account is
-      // still signed into the browser instead of letting the person pick
-      // a different one — this is what "shows the same account" was.
-      options: provider === 'google' ? { queryParams: { prompt: 'select_account' } } : undefined,
+      options: {
+        // Without an explicit redirectTo, Supabase falls back to the
+        // project's configured Site URL — which is the live Vercel
+        // site. That's fine on the actual website, but inside the
+        // native Android app it meant finishing Google sign-in dumped
+        // you out into the website instead of back into the app. This
+        // sends native users back via a custom URL scheme instead,
+        // caught by the appUrlOpen listener below.
+        redirectTo: Capacitor.isNativePlatform() ? 'io.cookify.app://auth-callback' : undefined,
+        // Without this, Google silently reuses whatever Google account is
+        // still signed into the browser instead of letting the person pick
+        // a different one — this is what "shows the same account" was.
+        queryParams: provider === 'google' ? { prompt: 'select_account' } : undefined,
+      },
     });
     if (error) {
       alert(`Login failed: ${error.message}`);

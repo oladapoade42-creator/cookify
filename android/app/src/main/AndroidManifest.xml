@@ -32,6 +32,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Lets Android hand control back to this app (instead of
+                 opening the live website) when Google sign-in redirects
+                 to io.cookify.app://auth-callback. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="io.cookify.app" android:host="auth-callback" />
+            </intent-filter>
+
         </activity>
 
        <!-- C:/cookify. io/android/app/src/main/AndroidManifest.xml -->

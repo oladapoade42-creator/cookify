@@ -1,54 +1,50 @@
-# Cookify — AI Tutor fix, Where to Buy fix, Android performance, doodles
+# Cookify — Google sign-in returning to the website instead of the app
 
-10 files: 9 changed, 1 new (`EmptyStateDoodles.jsx`) — all pure code,
-no SQL/dashboard steps needed.
+3 files: `src/App.jsx`, `android/app/src/main/AndroidManifest.xml`
+(overwrite), `package.json` (adds one new dependency).
 
-## 1. AI Tutor "X" not stopping speech
-Not actually a broken stop button — `closeTutor()` was already calling
-the right stop function. The real bug: three places in the code `await`
-a Gemini response and then speak it out loud with no check on whether
-the tutor was still open by the time that response arrived. Close the
-tutor quickly while a reply is still in flight, and the reply would
-speak anyway once it landed, seconds after you'd already left. Fixed
-with a ref that always reflects the tutor's *current* open/closed
-state (state values in an async callback can go stale; refs don't).
+## What was happening
+Your sign-in code never told Supabase where to send people back to
+after Google auth finished — so it fell back to your project's
+configured "Site URL," which is your live Vercel site. That's correct
+behavior *on the website*, but inside the native Android app it meant
+finishing sign-in kicked you out of the app and into the browser
+showing the website instead.
 
-## 2. "Where to Buy" stuck loading forever
-Found it: when zero sellers matched a dish (the common case for a new
-app), the code returned early from inside a `try` block — skipping the
-`setLoadingWhereToBuy(false)` that came after it. Moved that into a
-`finally`, so every path out of the function clears the spinner, no
-matter what. Also added real geolocation: it now asks for your
-location and sorts results by actual distance (shows "X.Xkm away"),
-degrading gracefully with unsorted results if location is denied.
+## The fix
+1. On native, sign-in now redirects to a custom URL
+   (`io.cookify.app://auth-callback`) instead of the website.
+2. Added an intent-filter to `AndroidManifest.xml` so Android hands that
+   URL back to Cookify itself instead of trying to open it as a normal
+   link.
+3. Added a listener (`src/App.jsx`, using the new `@capacitor/app`
+   package) that catches that URL when it arrives and manually
+   completes the sign-in — this doesn't happen automatically for a deep
+   link the way it does for a normal page reload.
 
-## 3. Android performance
-Two real, measurable culprits found and fixed:
-- **Zero images anywhere used lazy loading** — every recipe image in
-  every list loaded immediately regardless of visibility. Added
-  `loading="lazy" decoding="async"` to every list/feed image across
-  the app (left the profile photo eager, since that one really is
-  always immediately visible).
-- **Heavy, stacked `backdrop-blur`** — the header and bottom nav (always
-  mounted, sitting directly over scrolling content) used the heaviest
-  Tailwind blur tiers, recomputed every scroll frame. Worse: every
-  single feed card had 5 more individually-blurred small buttons
-  (menu/like/comment/share/save) — multiplied across every card
-  rendered in the feed, likely the single biggest cause of the reported
-  lag. Reduced header/nav blur intensity substantially, and removed
-  blur entirely from the per-card buttons (compensated with slightly
-  more opaque backgrounds so they're still clearly visible without it).
+## Setup steps — three, and all are required
+**1. Install the new dependency:**
+```
+npm install
+npx cap sync android
+```
 
-None of this changes how anything looks at a glance — same frosted,
-dark aesthetic — it's specifically about not paying GPU cost for blur
-where it added minimal visual value but got very expensive once
-multiplied across a scrolling list.
+**2. Add the redirect URL to Supabase's allow-list** (this is the step
+most likely to bite if skipped — Supabase will silently refuse to
+redirect anywhere not on this list):
+Supabase Dashboard → Authentication → URL Configuration → **Redirect
+URLs** → add:
+```
+io.cookify.app://auth-callback
+```
 
-## 4. A few doodles, placed where there was genuinely nothing else
-Added `EmptyStateDoodles.jsx` — four small monochrome line-art SVGs
-(no image assets, no new colors) — and placed them in the emptiest,
-most text-only spots: empty Favorites, empty comments, empty "Where to
-Buy" results, and empty "My Diet Plans." Didn't touch anywhere that
-already has real content or a clear visual hierarchy — wanted this to
-feel like a few thoughtful touches, not a wholesale re-skin you didn't
-ask for.
+**3. Rebuild the Android app** in Android Studio (Build → Rebuild
+Project) so the updated manifest actually takes effect — a hot-reload
+of just the web bundle won't pick up native manifest changes.
+
+## After that
+Test signing in from the native app — it should now land you back
+inside Cookify itself immediately after choosing a Google account,
+instead of opening the website. The web version (Vercel) is unaffected
+either way — this only changes behavior when `Capacitor.isNativePlatform()`
+is true.

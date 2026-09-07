@@ -4,6 +4,7 @@ import { supabase } from "../supabase";
 import { getUserItem } from "../utils/userStorage";
 import { moderateText } from "../utils/moderation";
 import { haversineKm } from "../utils/geo";
+import { classifyFile, uploadFoodMedia } from "../utils/foodMedia";
 
 const ORDER_STAGES = ["pending", "preparing", "out_for_delivery", "delivered"];
 const STAGE_LABELS = {
@@ -22,10 +23,33 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
   const [distanceInfo, setDistanceInfo] = useState(null);
   const [showPostForm, setShowPostForm] = useState(false);
   const [posting, setPosting] = useState(false);
-  const [draft, setDraft] = useState({ title: "", price: "", description: "", image: "" });
+  const [draft, setDraft] = useState({ title: "", price: "", description: "", media: [] }); // media: [{ file, previewUrl, type }]
+  const [checkingMedia, setCheckingMedia] = useState(false);
   const fileInputRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  // Whether the CURRENT user (if a seller) has filled in enough payment
+  // details to be allowed to post — prevents someone from listing food
+  // with no way for a buyer to actually pay them.
+  const [myPaymentComplete, setMyPaymentComplete] = useState(null); // null = not checked yet
+
+  useEffect(() => {
+    if (!authUser || !isSeller) {
+      setMyPaymentComplete(null);
+      return;
+    }
+    supabase
+      .from("profiles")
+      .select("seller_bank_name, seller_account_name, seller_account_number")
+      .eq("user_id", authUser.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        setMyPaymentComplete(
+          !!(data?.seller_bank_name?.trim() && data?.seller_account_name?.trim() && data?.seller_account_number?.trim())
+        );
+      })
+      .catch(() => setMyPaymentComplete(false));
+  }, [authUser, isSeller]);
 
   useEffect(() => {
     loadListings();
@@ -154,16 +178,43 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
     } catch (e) {}
   }
 
-  function handleImageFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setDraft((d) => ({ ...d, image: reader.result }));
-    reader.readAsDataURL(file);
+  async function handleMediaFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ""; // allow picking the same file again later
+    if (files.length === 0) return;
+
+    setCheckingMedia(true);
+    for (const file of files) {
+      if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+        alert(`"${file.name}" isn't an image or video — skipped.`);
+        continue;
+      }
+      const { isFood } = await classifyFile(file);
+      if (!isFood) {
+        alert(`"${file.name}" — that's not food 😏. Please upload a photo or video of the dish itself.`);
+        continue;
+      }
+      const previewUrl = URL.createObjectURL(file);
+      const type = file.type.startsWith("video/") ? "video" : "image";
+      setDraft((d) => ({ ...d, media: [...d.media, { file, previewUrl, type }] }));
+    }
+    setCheckingMedia(false);
+  }
+
+  function removeMediaAt(index) {
+    setDraft((d) => {
+      const removed = d.media[index];
+      if (removed) URL.revokeObjectURL(removed.previewUrl);
+      return { ...d, media: d.media.filter((_, i) => i !== index) };
+    });
   }
 
   async function postListing() {
     if (!draft.title.trim() || !draft.price) return;
+    if (myPaymentComplete === false) {
+      alert("Add your payment details on your Profile page before posting food — buyers need a way to pay you.");
+      return;
+    }
     setPosting(true);
     try {
       // Use the seller's public username, never their email — the email
@@ -179,18 +230,32 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
       }
       const { flagged, reason } = await moderateText(`${draft.title}\n${draft.description}`);
 
+      // Each file was already classified as food at selection time
+      // (handleMediaFiles) — this just uploads them now.
+      const uploaded = [];
+      for (const item of draft.media) {
+        try {
+          uploaded.push(await uploadFoodMedia(authUser, item.file));
+        } catch (e) {
+          // Skip a single failed upload rather than aborting the whole
+          // post — better to publish with the photos that did work.
+        }
+      }
+
       await supabase.from("food_listings").insert({
         seller_id: authUser.id,
         seller_name: sellerName,
         title: draft.title.trim(),
         price: parseFloat(draft.price),
         description: draft.description.trim(),
-        image: draft.image || null,
+        image: uploaded.find((m) => m.type === "image")?.url || null, // legacy column, kept for older display code
+        media: uploaded,
         flagged,
         flag_reason: flagged ? reason : null,
         is_visible: !flagged,
       });
-      setDraft({ title: "", price: "", description: "", image: "" });
+      draft.media.forEach((m) => URL.revokeObjectURL(m.previewUrl));
+      setDraft({ title: "", price: "", description: "", media: [] });
       setShowPostForm(false);
       loadListings();
       if (flagged) alert("Your listing was saved and is pending a quick review before it appears publicly.");
@@ -205,21 +270,38 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
 
   return (
     <div className="flex-1 bg-black p-5 overflow-y-auto text-white">
-      <div className="flex items-center justify-between">
+      <div className="rounded-2xl bg-amber-400 px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-black">
+        ⚠️ Service before payment — confirm you're getting what you paid for
+      </div>
+
+      <div className="mt-4 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-black">E-Restaurant</h1>
           <p className="text-gray-400 mt-1">Order real food from Cookify Pro+ sellers.</p>
         </div>
         {isSeller && (
           <button
-            onClick={() => setShowPostForm(true)}
-            className="rounded-full bg-white text-black p-3"
-            aria-label="Post food"
+            onClick={() => {
+              if (myPaymentComplete === false) {
+                alert("Add your payment details on your Profile page first — buyers need a way to pay you before you can post food.");
+                return;
+              }
+              setShowPostForm(true);
+            }}
+            className={`rounded-full p-3 transition ${myPaymentComplete === false ? "bg-white/10 text-white/40" : "bg-white text-black"}`}
+            aria-label={myPaymentComplete === false ? "Add payment details before posting" : "Post food"}
+            title={myPaymentComplete === false ? "Add payment details on your Profile first" : "Post food"}
           >
             <Plus className="h-5 w-5" />
           </button>
         )}
       </div>
+
+      {isSeller && myPaymentComplete === false && (
+        <p className="mt-2 text-xs text-amber-300">
+          Add your bank details on your Profile page before you can post food — buyers need a way to pay you.
+        </p>
+      )}
 
       {!isSeller && (
         <p className="mt-3 text-xs text-gray-500">
@@ -233,10 +315,16 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
         <p className="mt-10 text-center text-sm text-gray-500">No food listed yet — check back soon.</p>
       ) : (
         <div className="mt-6 grid grid-cols-2 gap-4">
-          {listings.map((listing) => (
+          {listings.map((listing) => {
+            const firstMedia = listing.media?.[0] || (listing.image ? { url: listing.image, type: "image" } : null);
+            return (
             <div key={listing.id} className="rounded-3xl border border-white/10 bg-zinc-900/80 overflow-hidden">
-              {listing.image ? (
-                <img src={listing.image} alt={listing.title} loading="lazy" decoding="async" className="h-28 w-full object-cover" />
+              {firstMedia ? (
+                firstMedia.type === "video" ? (
+                  <video src={firstMedia.url} muted loop playsInline className="h-28 w-full object-cover" />
+                ) : (
+                  <img src={firstMedia.url} alt={listing.title} loading="lazy" decoding="async" className="h-28 w-full object-cover" />
+                )
               ) : (
                 <div className="h-28 w-full bg-white/5 flex items-center justify-center"><ChefHat className="text-white/30" /></div>
               )}
@@ -252,7 +340,8 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -408,13 +497,46 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
               </button>
             </div>
 
+            {draft.media.length > 0 && (
+              <div className="grid grid-cols-3 gap-2">
+                {draft.media.map((m, i) => (
+                  <div key={i} className="relative h-20 overflow-hidden rounded-xl border border-white/10">
+                    {m.type === "video" ? (
+                      <video src={m.previewUrl} muted className="h-full w-full object-cover" />
+                    ) : (
+                      <img src={m.previewUrl} className="h-full w-full object-cover" />
+                    )}
+                    <button
+                      onClick={() => removeMediaAt(i)}
+                      className="absolute right-1 top-1 rounded-full bg-black/70 p-1"
+                      aria-label="Remove"
+                    >
+                      <X className="h-3 w-3 text-white" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-full h-32 rounded-2xl border border-dashed border-white/20 flex items-center justify-center overflow-hidden"
+              disabled={checkingMedia}
+              className="mt-2 w-full h-16 rounded-2xl border border-dashed border-white/20 flex items-center justify-center gap-2 text-sm text-gray-500 disabled:opacity-50"
             >
-              {draft.image ? <img src={draft.image} className="h-full w-full object-cover" /> : <span className="text-sm text-gray-500">Tap to add a photo</span>}
+              {checkingMedia ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Checking...</>
+              ) : (
+                "Tap to add photos or videos"
+              )}
             </button>
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageFile} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              className="hidden"
+              onChange={handleMediaFiles}
+            />
 
             <input
               value={draft.title}

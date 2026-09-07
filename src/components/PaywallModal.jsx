@@ -13,6 +13,7 @@ const PRO_PLUS_BENEFITS = [
   "Everything in Cookify Pro",
   "Unlimited AI Chef questions",
   "Sell your own dishes on E-Restaurant",
+  "Cookify will help you advertise your goods",
   "Ad-free browsing for your first month",
 ];
 
