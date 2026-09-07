@@ -111,7 +111,7 @@ export default function App() {
       return;
     }
     const { error } = await supabase.auth.signInWithOAuth({
-      provider,
+      provider: 'google',
       options: {
         // Without an explicit redirectTo, Supabase falls back to the
         // project's configured Site URL — which is the live Vercel
@@ -120,7 +120,7 @@ export default function App() {
         // you out into the website instead of back into the app. This
         // sends native users back via a custom URL scheme instead,
         // caught by the appUrlOpen listener below.
-        redirectTo: Capacitor.isNativePlatform() ? 'io.cookify.app://auth-callback' : undefined,
+        redirectTo: 'cookify.io://callback',
         // Without this, Google silently reuses whatever Google account is
         // still signed into the browser instead of letting the person pick
         // a different one — this is what "shows the same account" was.
