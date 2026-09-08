@@ -60,18 +60,39 @@ export default function App() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
 
-    const sub = CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
+    const handleAuthUrl = async (url) => {
       if (!url || !url.startsWith('io.cookify.app://auth-callback')) return;
       try {
-        const code = new URL(url).searchParams.get('code');
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) console.error('[Cookify] Failed to complete sign-in from deep link:', error.message);
+        // Confirmed from an actual received URL: this project's OAuth
+        // setup returns access_token/refresh_token directly in the URL
+        // fragment (after #), not as a `code` to exchange — the opposite
+        // of what the previous version of this code assumed.
+        const hash = url.split('#')[1] || '';
+        const params = new URLSearchParams(hash);
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
+        if (!access_token || !refresh_token) {
+          alert('[Cookify debug] Deep link missing tokens:\n' + url);
+          return;
         }
+        const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+        if (error) alert('[Cookify debug] Sign-in failed at setSession:\n' + error.message);
       } catch (e) {
-        console.error('[Cookify] Error handling auth deep link:', e);
+        alert('[Cookify debug] Error handling auth deep link:\n' + String(e));
       }
+    };
+
+    // Cold start: Android fully closed the app (very common after sitting
+    // in an external browser for the Google sign-in flow), so this deep
+    // link is what actually launches a fresh instance of the app — the
+    // appUrlOpen listener below only fires for links arriving while the
+    // app is already running, so it alone would miss this case entirely.
+    CapacitorApp.getLaunchUrl().then((result) => {
+      if (result?.url) handleAuthUrl(result.url);
     });
+
+    // Warm case: the app was already running in the background.
+    const sub = CapacitorApp.addListener('appUrlOpen', ({ url }) => handleAuthUrl(url));
 
     return () => { sub.then((s) => s.remove()); };
   }, []);
@@ -111,7 +132,7 @@ export default function App() {
       return;
     }
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
+      provider,
       options: {
         // Without an explicit redirectTo, Supabase falls back to the
         // project's configured Site URL — which is the live Vercel
@@ -120,7 +141,7 @@ export default function App() {
         // you out into the website instead of back into the app. This
         // sends native users back via a custom URL scheme instead,
         // caught by the appUrlOpen listener below.
-        redirectTo: 'cookify.io://callback',
+        redirectTo: Capacitor.isNativePlatform() ? 'io.cookify.app://auth-callback' : undefined,
         // Without this, Google silently reuses whatever Google account is
         // still signed into the browser instead of letting the person pick
         // a different one — this is what "shows the same account" was.
