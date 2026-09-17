@@ -10,7 +10,6 @@ const TIER_CONFIG = {
     activeLabel: "Cookify Pro Active",
     title: "Cookify Pro",
     description: "25 AI Chef questions/day + Pro features — $2/month",
-    planEnvKey: "VITE_FLW_PLAN_ID_PRO",
   },
   pro_plus: {
     amount: 4,
@@ -18,7 +17,6 @@ const TIER_CONFIG = {
     activeLabel: "Cookify Pro+ Active",
     title: "Cookify Pro+",
     description: "Unlimited AI Chef + sell food on E-Restaurant + Cookify helps advertise your goods — $4/month",
-    planEnvKey: "VITE_FLW_PLAN_ID_PRO_PLUS",
   },
 };
 
@@ -39,7 +37,22 @@ const TIER_CONFIG = {
 export default function UpgradeButton({ authUser, currentTier, tier = "pro", onUpgraded, className, compact }) {
   const cfg = TIER_CONFIG[tier];
   const isActive = currentTier === tier;
-  const publicKey = import.meta.env.VITE_FLW_PUBLIC_KEY || "";
+  const publicKey = import.meta.env.VITE_FLW_PUBLIC_KEY;
+
+  if (tier === "pro_plus") {
+    return (
+      <button
+        type="button"
+        disabled
+        title="cookify pro_plus is temporarily unavailable"
+        className={className || (compact
+          ? "p-2 rounded-full border border-white/15 bg-white/5 text-gray-400 disabled:opacity-60"
+          : "rounded-full px-4 py-2 text-[12px] font-bold uppercase tracking-[0.12em] border border-white/15 bg-white/5 text-gray-400 disabled:opacity-60")}
+      >
+        cookify pro_plus is temporarily unavailable
+      </button>
+    );
+  }
 
   if (!publicKey) {
     return (
@@ -72,7 +85,9 @@ export default function UpgradeButton({ authUser, currentTier, tier = "pro", onU
 
 function UpgradeButtonActive({ authUser, isActive, tier, cfg, publicKey, onUpgraded, className, compact }) {
   const [verifying, setVerifying] = useState(false);
-  const planId = import.meta.env[cfg.planEnvKey] || "";
+  const planId = tier === "pro"
+    ? import.meta.env.VITE_FLW_PLAN_ID_PRO
+    : import.meta.env.VITE_FLW_PLAN_ID_PRO_PLUS;
 
   const config = {
     public_key: publicKey,

@@ -15,9 +15,21 @@ const isNative = () => Capacitor.isNativePlatform();
 let initialized = false;
 let interstitialLoaded = false;
 let loadInFlight = null;
+let adsEnabled = false;
+
+export function setAdsEnabled(enabled) {
+  adsEnabled = enabled;
+  if (!enabled) {
+    interstitialLoaded = false;
+  }
+}
 
 export async function initAds() {
-  if (!isNative() || initialized) return;
+  if (!isNative() || !adsEnabled) return;
+  if (initialized) {
+    preloadInterstitial();
+    return;
+  }
   try {
     await AdMob.initialize({
       // Flip to true only while testing, and add your test device ID —
@@ -38,7 +50,7 @@ export async function initAds() {
 // that moment. Safe to call repeatedly — it won't start a second load
 // while one is already in flight or one is already sitting ready.
 export function preloadInterstitial() {
-  if (!isNative() || !initialized || interstitialLoaded || loadInFlight) return;
+  if (!isNative() || !adsEnabled || !initialized || interstitialLoaded || loadInFlight) return;
   loadInFlight = AdMob.prepareInterstitial({ adId: INTERSTITIAL_AD_UNIT_ID })
     .then(() => {
       interstitialLoaded = true;
@@ -57,7 +69,7 @@ export function preloadInterstitial() {
 // loading yet, or there's no fill from AdMob), it just starts loading one
 // for next time instead of making the person wait or blocking the close.
 export async function showExitInterstitial() {
-  if (!isNative() || !initialized || !interstitialLoaded) {
+  if (!isNative() || !adsEnabled || !initialized || !interstitialLoaded) {
     preloadInterstitial();
     return;
   }

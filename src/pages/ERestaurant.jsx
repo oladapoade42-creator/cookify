@@ -278,6 +278,7 @@ export default function ERestaurant({ authUser, isSeller, openListingId }) {
         <div>
           <h1 className="text-3xl font-black">E-Restaurant</h1>
           <p className="text-gray-400 mt-1">Order real food from Cookify Pro+ sellers.</p>
+          <p className="mt-2 text-xs text-amber-300">cookify pro_plus is temporarily unavailable</p>
         </div>
         {isSeller && (
           <button

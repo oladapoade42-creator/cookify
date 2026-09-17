@@ -15,7 +15,7 @@ import StreakMilestoneModal from './components/StreakMilestoneModal';
 import PaywallModal from './components/PaywallModal';
 import { getUserItem, setUserItem, migrateAllLegacyKeys } from './utils/userStorage';
 import React, { useState, useEffect } from 'react';
-import { initAds } from './utils/ads';
+import { initAds, setAdsEnabled } from './utils/ads';
 import { Capacitor } from '@capacitor/core';
 import { App as CapacitorApp } from '@capacitor/app';
 import { enableWaterReminders, enableMealReminders, scheduleStreakExpiryWarning } from './utils/notifications';
@@ -43,13 +43,6 @@ export default function App() {
   useEffect(() => {
     //This ensures it only runs safely in the browser context
     inject();
-  }, []);
-
-  useEffect(() => {
-    // No-ops on web (Vercel/browser) — only does anything inside the
-    // native Android/iOS app build. Preloads the first interstitial too,
-    // so one's ready the first time someone exits a recipe.
-    initAds();
   }, []);
 
   // Catches the io.cookify.app://auth-callback deep link Google sign-in
@@ -199,6 +192,7 @@ export default function App() {
   const [cookedRecipesList, setCookedRecipesList] = useState([]);
   const [isPremium, setIsPremium] = useState(false);
   const [tier, setTier] = useState(null); // 'pro' | 'pro_plus' | null
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const isSeller = tier === 'pro_plus'; // only Pro+ subscribers can sell on E-Restaurant
   const [tutorOpenRequest, setTutorOpenRequest] = useState(0);
   const [openListingId, setOpenListingId] = useState(null);
@@ -275,25 +269,35 @@ export default function App() {
   const upgradeToPro = (newTier = 'pro') => {
     setIsPremium(true);
     setTier(newTier);
+    setAdsEnabled(false);
   };
 
   // Real Pro status comes from the subscriptions table, not a local click.
   useEffect(() => {
     setIsPremium(false);
     setTier(null);
-    if (!authUser) return;
+    setSubscriptionLoading(true);
+    setAdsEnabled(false);
+    if (!authUser) {
+      setSubscriptionLoading(false);
+      return;
+    }
     supabase
       .from('subscriptions')
       .select('status, tier')
       .eq('user_id', authUser.id)
       .maybeSingle()
-      .then(({ data }) => {
-        if (data?.status === 'active') {
+      .then(({ data, error }) => {
+        if (!error && data?.status === 'active') {
           setIsPremium(true);
           setTier(data.tier || 'pro');
+        } else if (!error) {
+          setAdsEnabled(true);
+          initAds();
         }
+        setSubscriptionLoading(false);
       })
-      .catch(() => {}); // subscriptions table not set up yet
+      .catch(() => setSubscriptionLoading(false));
   }, [authUser?.id]);
 
   const persistProgress = (partial) => {
@@ -452,6 +456,7 @@ export default function App() {
               authUser={authUser}
               isPremium={isPremium}
               tier={tier}
+              subscriptionLoading={subscriptionLoading}
             />
           )}
           {activeTab === 'learn' && <Learn />}

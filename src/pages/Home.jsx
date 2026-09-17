@@ -5,7 +5,6 @@ import { Flame, Star, ChefHat, Camera, Loader2, X, ScanLine, ArrowLeft, MoreHori
 import { supabase } from "../supabase";
 import { pickNaturalVoice, stopSpeaking } from "../utils/voice";
 import { getDailyTrivia } from "../utils/dailyTrivia";
-import AdSlot from "../components/AdSlot";
 import { downloadTextPdf } from "../utils/pdf";
 import { showExitInterstitial } from "../utils/ads";
 import { getUserItem, setUserItem } from "../utils/userStorage";
@@ -119,7 +118,7 @@ async function analyzeFoodImage(imageBase64, mode = "calories") {
   }
 }
 
-export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRecipe, onOpenFavorites, onRecipeCooked, cookedCount = 0, streak = 0, xp = 0, authProvider = null, dailyChallengeDone = false, dailyAnswers = {}, onAnswerChallenge, callGeminiApi, onOrderNow, authUser = null, tier = null, isPremium = false }) {
+export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRecipe, onOpenFavorites, onRecipeCooked, cookedCount = 0, streak = 0, xp = 0, authProvider = null, dailyChallengeDone = false, dailyAnswers = {}, onAnswerChallenge, callGeminiApi, onOrderNow, authUser = null, tier = null, isPremium = false, subscriptionLoading = true }) {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scanMode, setScanMode] = useState("calories"); // 'calories' | 'dietplan' | 'ingredients'
   const [challengeOpen, setChallengeOpen] = useState(false);
@@ -1026,7 +1025,6 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
                   onNotInterested={() => dismissRecipe(recipe.id)}
                   onView={() => registerView(recipe)}
                 />
-                {(i + 1) % 4 === 0 && <AdSlot tier={tier} />}
               </div>
             ))}
         </div>
@@ -1352,7 +1350,10 @@ export default function Home({ openTutorSignal = false, onTutorOpened, onSaveRec
         <div className="cookify-sheet-in w-full bg-black sm:max-w-[420px] sm:rounded-[36px] sm:border sm:border-white/10 sm:shadow-[0_30px_90px_rgba(0,0,0,0.6)] sm:overflow-hidden sm:self-start">
           <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-white/10 bg-black/90 backdrop-blur-xl p-4">
             <button
-              onClick={() => { setExpandedRecipe(null); if (!isPremium) showExitInterstitial(); }}
+              onClick={() => {
+                setExpandedRecipe(null);
+                if (!subscriptionLoading && !isPremium) showExitInterstitial();
+              }}
               className="rounded-full border border-white/15 bg-white/5 backdrop-blur-xl p-2 text-white transition hover:bg-white/10"
               aria-label="Back to feed"
             >
