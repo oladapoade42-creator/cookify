@@ -397,13 +397,10 @@ export default function App() {
     setFavorites((prev) => prev.filter((item) => String(item.id) !== String(recipeId)));
   };
 
-  const [theme, setTheme] = useState(() => localStorage.getItem('cookify_theme') || 'dark');
-  const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('cookify_theme', next);
-      return next;
-    });
+  const [theme, setTheme] = useState(() => localStorage.getItem('cookify_theme') || 'green');
+  const handleThemeChange = (nextTheme) => {
+    setTheme(nextTheme);
+    localStorage.setItem('cookify_theme', nextTheme);
   };
 
   if (isStartupLoading || !isAuthReady) {
@@ -413,15 +410,15 @@ export default function App() {
   // If not logged in, show the Auth Screen
   if (!isAuthenticated) {
     return (
-      <div className="app-container">
+      <div className={`app-container cookify-theme-${theme} ${theme === 'light' ? 'light-theme' : ''}`}>
         <AuthScreen onLogin={handleLogin} />
       </div>
     );
   }
 
   return (
-    <div className={`relative flex flex-col h-screen w-full max-w-[430px] mx-auto bg-slate-950 text-white overflow-hidden shadow-[0_20px_80px_rgba(0,0,0,0.45)] sm:rounded-[32px] ${theme === 'light' ? 'light-theme' : ''}`}>
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_18%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.04),transparent_18%),linear-gradient(180deg,rgba(0,0,0,0.95),rgba(0,0,0,0.99))]" />
+    <div className={`cookify-theme-${theme} relative flex flex-col h-screen w-full max-w-[430px] mx-auto bg-slate-950 text-white overflow-hidden shadow-[0_20px_80px_rgba(0,0,0,0.45)] sm:rounded-[32px] ${theme === 'light' ? 'light-theme' : ''}`}>
+      <div className={`pointer-events-none absolute inset-0 ${theme === 'green' ? 'bg-[radial-gradient(circle_at_top_left,rgba(134,239,172,0.09),transparent_22%),radial-gradient(circle_at_bottom_right,rgba(251,191,36,0.05),transparent_20%),linear-gradient(180deg,#101713,#0b100d)]' : 'bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_18%),radial-gradient(circle_at_bottom_right,rgba(255,255,255,0.04),transparent_18%),linear-gradient(180deg,rgba(0,0,0,0.95),rgba(0,0,0,0.99))]'}`} />
       {/* Top Header — kept to a single compact row, like a typical app's
           top bar, instead of the previous two-line header with a
           subtitle and full-width pill buttons. Frees up vertical space
@@ -514,7 +511,7 @@ export default function App() {
               onBack={() => setActiveTab('profile')}
               onLogout={handleLogout}
               theme={theme}
-              onToggleTheme={toggleTheme}
+              onThemeChange={handleThemeChange}
               authUser={authUser}
             />
           )}

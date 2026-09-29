@@ -1,12 +1,12 @@
 import { useState, useEffect } from "react";
-import { ArrowLeft, Bell, Moon, Sun, LogOut, Crown, ChevronRight, Trash2, Loader2, Droplet, Utensils, ShieldAlert, Check } from "lucide-react";
+import { ArrowLeft, Bell, Moon, Palette, LogOut, Crown, ChevronRight, Trash2, Loader2, Droplet, Utensils, ShieldAlert, Check } from "lucide-react";
 import { supabase } from "../supabase";
 import { Capacitor } from "@capacitor/core";
 import { getUserItem, setUserItem } from "../utils/userStorage";
 import { enableWaterReminders, disableWaterReminders, enableMealReminders, disableMealReminders } from "../utils/notifications";
 import { isAdmin } from "../utils/admin";
 
-export default function Settings({ isPremium = false, onBack = () => {}, onLogout = () => {}, theme = "dark", onToggleTheme = () => {}, authUser = null }) {
+export default function Settings({ isPremium = false, onBack = () => {}, onLogout = () => {}, theme = "green", onThemeChange = () => {}, authUser = null }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [notifications, setNotifications] = useState(
@@ -191,22 +191,35 @@ export default function Settings({ isPremium = false, onBack = () => {}, onLogou
               />
             </button>
           </div>
-          <div className="flex items-center justify-between py-2">
-            <div className="flex items-center gap-3">
-              {theme === "light" ? <Sun className="h-5 w-5 text-white/80" /> : <Moon className="h-5 w-5 text-white/80" />}
-              <span className="font-medium">Light Mode</span>
+          <div className="py-2">
+            <div className="mb-3 flex items-center gap-3">
+              <Palette className="h-5 w-5 text-white/80" />
+              <span className="font-medium">Appearance</span>
             </div>
-            <button
-              onClick={onToggleTheme}
-              className={`h-7 w-12 rounded-full transition ${theme === "light" ? "bg-white" : "bg-white/10"}`}
-              aria-pressed={theme === "light"}
-            >
-              <span
-                className={`block h-6 w-6 rounded-full shadow transition-transform ${
-                  theme === "light" ? "translate-x-5 bg-black" : "translate-x-0.5 bg-gray-500"
-                }`}
-              />
-            </button>
+            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Appearance">
+              {[
+                { id: "green", label: "Fresh Green", colors: ["#101713", "#86efac"] },
+                { id: "dark", label: "Black & White", colors: ["#090909", "#ffffff"] },
+                { id: "light", label: "White & Black", colors: ["#ffffff", "#090909"] },
+              ].map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === option.id}
+                  onClick={() => onThemeChange(option.id)}
+                  className={`min-w-0 rounded-xl border p-2 text-left transition ${
+                    theme === option.id ? "border-emerald-300 bg-emerald-300/10" : "border-white/10 bg-white/5 hover:bg-white/10"
+                  }`}
+                >
+                  <span className="mb-2 flex h-7 overflow-hidden rounded-md border border-white/10" aria-hidden="true">
+                    <span className="flex-1" style={{ backgroundColor: option.colors[0] }} />
+                    <span className="flex-1" style={{ backgroundColor: option.colors[1] }} />
+                  </span>
+                  <span className="block text-center text-[10px] font-semibold leading-tight">{option.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </section>
 

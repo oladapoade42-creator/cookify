@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X, CirclePlay, MapPin, Loader2 } from "lucide-react";
+import { Clock, Star, Heart, MessageSquare, Share2, MoreHorizontal, X, CirclePlay, MapPin, Loader2, Reply, Pencil, Trash2 } from "lucide-react";
 import { supabase } from "../supabase";
 import { moderateText } from "../utils/moderation";
 import { getUserItem } from "../utils/userStorage";
@@ -37,6 +37,11 @@ export default function RecipeCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
   const [postingComment, setPostingComment] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [replyToId, setReplyToId] = useState(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [expandedReplyIds, setExpandedReplyIds] = useState(() => new Set());
   const [showWhereToBuy, setShowWhereToBuy] = useState(false);
   const [whereToBuyResults, setWhereToBuyResults] = useState(null); // null = not searched yet
   const [loadingWhereToBuy, setLoadingWhereToBuy] = useState(false);
@@ -121,21 +126,46 @@ export default function RecipeCard({
     return () => { cancelled = true; supabase.removeChannel(channel); };
   }, [recipeId, authUser]);
 
-  useEffect(() => {
-    if (!recipeId) return;
-    let cancelled = false;
-    supabase
-      .from("comments")
-      .select("id, provider, username, text, created_at, flagged")
-      .eq("recipe_id", String(recipeId))
-      .eq("flagged", false)
-      .order("created_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (!cancelled && !error && data) setComments(data);
-      })
-      .catch(() => {}); // comments table not set up yet — stays empty
-    return () => { cancelled = true; };
-  }, [recipeId]);
+useEffect(() => {
+  if (!recipeId) return;
+  let cancelled = false;
+
+  supabase
+    .from("comments")
+    .select("id, user_id, parent_id, provider, username, text, created_at, edited_at, flagged")
+    .eq("recipe_id", String(recipeId))
+    .eq("flagged", false)
+    .order("created_at", { ascending: false })
+    .then(async ({ data, error }) => {
+      if (cancelled || error || !data) return;
+
+      const userIds = [...new Set(data.map((comment) => comment.user_id).filter(Boolean))];
+      let usernames = {};
+
+      if (userIds.length) {
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("user_id, username")
+          .in("user_id", userIds);
+
+        (profiles || []).forEach((p) => {
+          usernames[p.user_id] = p.username;
+        });
+      }
+
+      const withNames = data.map((comment) => ({
+        ...comment,
+        // real username first, old saved name only as a fallback
+        displayName: usernames[comment.user_id] || comment.username || "User",
+      }));
+
+      if (!cancelled) setComments(withNames);
+    });
+
+  return () => {
+    cancelled = true;
+  };
+}, [recipeId]);
 
   const handleLike = async (ev) => {
     ev.stopPropagation();
@@ -174,12 +204,12 @@ export default function RecipeCard({
     setShowComments(true);
   };
 
-  const postComment = async () => {
+  const postComment = async (parentId = null) => {
     if (!canComment) {
       setFeedback("Sign in with Google or Apple to comment on recipes.");
       return;
     }
-    const text = commentDraft.trim();
+    const text = (parentId ? replyDraft : commentDraft).trim();
     if (!text) return;
 
     setPostingComment(true);
@@ -192,6 +222,7 @@ export default function RecipeCard({
     const newComment = {
       recipe_id: String(recipeId),
       user_id: authUser?.id || null,
+      parent_id: parentId,
       provider: authProvider,
       username: getUserItem(authUser, "cookify_username") || null,
       text,
@@ -202,13 +233,134 @@ export default function RecipeCard({
     try {
       const { data, error } = await supabase.from("comments").insert(newComment).select().single();
       if (error) throw error;
-      if (!flagged) setComments((prev) => [data, ...prev]);
-      setCommentDraft("");
+      if (!flagged) {
+        setComments((prev) => [{ ...data, username: newComment.username }, ...prev]);
+        if (parentId) setExpandedReplyIds((prev) => new Set(prev).add(parentId));
+      }
+      if (parentId) {
+        setReplyDraft("");
+        setReplyToId(null);
+      } else {
+        setCommentDraft("");
+      }
       if (flagged) setFeedback("Your comment was posted and is pending a quick review.");
     } catch (e) {
       setFeedback("Comments aren't set up on the backend yet — this comment wasn't saved.");
     }
     setPostingComment(false);
+  };
+
+  const saveCommentEdit = async (comment) => {
+    const text = editDraft.trim();
+    if (!text) return;
+    setPostingComment(true);
+    const { flagged, reason } = await moderateText(text);
+    const { error } = await supabase.from("comments").update({
+      text,
+      flagged,
+      flag_reason: flagged ? reason : null,
+    }).eq("id", comment.id).eq("user_id", authUser.id);
+    if (error) {
+      setFeedback("Couldn't update your comment.");
+    } else if (flagged) {
+      setComments((prev) => prev.filter((item) => item.id !== comment.id));
+      setFeedback("Your edited comment is pending a quick review.");
+      setEditingCommentId(null);
+    } else {
+      setComments((prev) => prev.map((item) => item.id === comment.id ? { ...item, text } : item));
+      setEditingCommentId(null);
+    }
+    setPostingComment(false);
+  };
+
+  const deleteComment = async (comment) => {
+    if (!window.confirm("Delete this comment and its replies?")) return;
+    const { error } = await supabase.from("comments").delete().eq("id", comment.id).eq("user_id", authUser.id);
+    if (error) {
+      setFeedback("Couldn't delete your comment.");
+      return;
+    }
+    setComments((prev) => {
+      const removedIds = new Set([comment.id]);
+      let foundNew = true;
+      while (foundNew) {
+        foundNew = false;
+        prev.forEach((item) => {
+          if (removedIds.has(item.parent_id) && !removedIds.has(item.id)) {
+            removedIds.add(item.id);
+            foundNew = true;
+          }
+        });
+      }
+      return prev.filter((item) => !removedIds.has(item.id));
+    });
+  };
+
+  const commentsByParent = comments.reduce((groups, comment) => {
+    const parentId = comment.parent_id || null;
+    groups[parentId] ||= [];
+    groups[parentId].push(comment);
+    return groups;
+  }, {});
+
+  const toggleReplies = (commentId) => {
+    setExpandedReplyIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(commentId)) next.delete(commentId);
+      else next.add(commentId);
+      return next;
+    });
+  };
+
+  const renderComment = (comment, depth = 0) => {
+    const replies = commentsByParent[comment.id] || [];
+    const visibleReplies = expandedReplyIds.has(comment.id) ? replies : replies.slice(0, 2);
+    const isOwner = !!authUser?.id && comment.user_id === authUser.id;
+    const authorName = comment.username || "Cook";
+    return (
+      <div key={comment.id} className={depth ? "ml-4 border-l-2 border-emerald-500/30 pl-3" : ""}>
+        <div className="flex gap-3">
+          <div className="h-9 w-9 shrink-0 rounded-full bg-white/10 border border-white/10 grid place-items-center text-xs font-bold text-white uppercase">
+            {authorName[0] || "?"}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-gray-500">{authorName}</p>
+            {editingCommentId === comment.id ? (
+              <div className="mt-2 space-y-2">
+                <textarea value={editDraft} onChange={(event) => setEditDraft(event.target.value)} rows={2} className="w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-white outline-none focus:border-white/30" />
+                <div className="flex gap-3 text-xs">
+                  <button onClick={() => saveCommentEdit(comment)} disabled={postingComment || !editDraft.trim()} className="text-emerald-300 disabled:opacity-40">Save</button>
+                  <button onClick={() => setEditingCommentId(null)} className="text-gray-400">Cancel</button>
+                </div>
+              </div>
+            ) : <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-gray-200">{comment.text}</p>}
+            {editingCommentId !== comment.id && (
+              <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                {canComment && <button onClick={() => { setReplyToId(comment.id); setReplyDraft(""); }} className="inline-flex items-center gap-1 hover:text-white"><Reply className="h-3.5 w-3.5" /> Reply</button>}
+                {isOwner && <button onClick={() => { setEditingCommentId(comment.id); setEditDraft(comment.text); }} className="inline-flex items-center gap-1 hover:text-white"><Pencil className="h-3.5 w-3.5" /> Edit</button>}
+                {isOwner && <button onClick={() => deleteComment(comment)} className="inline-flex items-center gap-1 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /> Delete</button>}
+              </div>
+            )}
+            {replyToId === comment.id && canComment && (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-emerald-300">Replying to {authorName}</p>
+                <div className="flex items-end gap-2">
+                  <textarea autoFocus value={replyDraft} onChange={(event) => setReplyDraft(event.target.value)} rows={2} placeholder="Write a reply..." className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-white placeholder-gray-500 outline-none focus:border-white/30" />
+                  <button onClick={() => postComment(comment.id)} disabled={postingComment || !replyDraft.trim()} className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-black disabled:opacity-40">Send</button>
+                  <button onClick={() => setReplyToId(null)} aria-label="Cancel reply" className="rounded-lg border border-white/10 p-2 text-gray-400 hover:text-white"><X className="h-4 w-4" /></button>
+                </div>
+              </div>
+            )}
+            {replies.length > 2 && (
+              <button onClick={() => toggleReplies(comment.id)} className="mt-3 text-xs font-semibold text-emerald-300 hover:text-emerald-200">
+                {expandedReplyIds.has(comment.id) ? "Hide replies" : `Show replies (${replies.length - 2})`}
+              </button>
+            )}
+          </div>
+        </div>
+        {visibleReplies.length > 0 && <div className="mt-3 space-y-4">{visibleReplies.map((reply) => renderComment(reply, depth + 1))}</div>}
+      </div>
+    );
   };
 
   // Finds E-Restaurant sellers listing this dish (matched loosely on
@@ -572,17 +724,7 @@ export default function RecipeCard({
                     <p className="text-sm text-gray-500">No comments yet — be the first.</p>
                   </div>
                 ) : (
-                  comments.map((c) => (
-                    <div key={c.id} className="flex gap-3">
-                      <div className="h-9 w-9 shrink-0 rounded-full bg-white/10 border border-white/10 grid place-items-center text-xs font-bold text-white uppercase">
-                        {(c.username || c.provider)?.[0] || "?"}
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500 uppercase tracking-wide">{c.username || c.provider || "Guest"}</p>
-                        <p className="text-sm text-gray-200 mt-0.5">{c.text}</p>
-                      </div>
-                    </div>
-                  ))
+                  (commentsByParent[null] || []).map((comment) => renderComment(comment))
                 )}
               </div>
 

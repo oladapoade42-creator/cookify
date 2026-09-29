@@ -115,6 +115,47 @@
   filter: brightness(0.97) contrast(1.02);
 }
 
+.cookify-theme-green {
+  background-color: #101713 !important;
+  color: #f2f7f2;
+}
+
+.cookify-theme-green [class^="bg-black"], .cookify-theme-green [class*=" bg-black"],
+.cookify-theme-green [class^="bg-zinc-8"], .cookify-theme-green [class*=" bg-zinc-8"],
+.cookify-theme-green [class^="bg-zinc-9"], .cookify-theme-green [class*=" bg-zinc-9"],
+.cookify-theme-green [class^="bg-neutral-9"], .cookify-theme-green [class*=" bg-neutral-9"],
+.cookify-theme-green [class^="bg-slate-9"], .cookify-theme-green [class*=" bg-slate-9"] {
+  background-color: #142019 !important;
+}
+
+.cookify-theme-green [class^="bg-white/"], .cookify-theme-green [class*=" bg-white/"] {
+  background-color: rgba(134, 239, 172, 0.07) !important;
+}
+
+.cookify-theme-green .bg-white,
+.cookify-theme-green .bg-white\/90 {
+  background-color: #86efac !important;
+  color: #102118 !important;
+}
+
+.cookify-theme-green .bg-white .text-black,
+.cookify-theme-green .bg-white\/90 .text-black,
+.cookify-theme-green .text-black {
+  color: #102118 !important;
+}
+
+.cookify-theme-green [class^="border-white/"], .cookify-theme-green [class*=" border-white/"] {
+  border-color: rgba(167, 243, 208, 0.16) !important;
+}
+
+.cookify-theme-green [class^="text-gray-4"], .cookify-theme-green [class*=" text-gray-4"] {
+  color: #aab9ad !important;
+}
+
+.cookify-theme-green [class^="text-gray-5"], .cookify-theme-green [class*=" text-gray-5"] {
+  color: #8d9c91 !important;
+}
+
 html,
 body,
 #root {

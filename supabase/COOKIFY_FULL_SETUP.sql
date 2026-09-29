@@ -105,6 +105,7 @@ create table if not exists public.comments (
   id uuid primary key default gen_random_uuid(),
   recipe_id text not null,
   user_id uuid references auth.users(id) on delete set null,
+  parent_id uuid references public.comments(id) on delete cascade,
   provider text,
   username text,
   text text not null default '',
@@ -117,10 +118,17 @@ create index if not exists comments_recipe_id_idx on public.comments (recipe_id)
 -- In case the table already existed from an earlier partial setup
 -- without these columns:
 alter table public.comments add column if not exists user_id uuid references auth.users(id) on delete set null;
+alter table public.comments add column if not exists parent_id uuid references public.comments(id) on delete cascade;
 alter table public.comments add column if not exists username text;
 alter table public.comments add column if not exists text text not null default '';
 alter table public.comments add column if not exists flagged boolean not null default false;
 alter table public.comments add column if not exists flag_reason text;
+update public.comments as comment
+set username = profile.username
+from public.profiles as profile
+where comment.user_id = profile.user_id
+  and (comment.username is null or comment.username = '');
+create index if not exists comments_parent_id_idx on public.comments (parent_id);
 
 alter table public.comments enable row level security;
 
@@ -130,7 +138,18 @@ create policy "comments are publicly readable"
 
 drop policy if exists "authenticated users can post comments" on public.comments;
 create policy "authenticated users can post comments"
-  on public.comments for insert to authenticated with check (true);
+  on public.comments for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "users can update their own comments" on public.comments;
+create policy "users can update their own comments"
+  on public.comments for update to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "users can delete their own comments" on public.comments;
+create policy "users can delete their own comments"
+  on public.comments for delete to authenticated
+  using (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------
 -- 5. LIKES
