@@ -146,6 +146,17 @@ textarea {
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+@keyframes cookify-loading-progress {
+  from { width: 0; }
+  to { width: 100%; }
+}
+
+.cookify-loading-progress {
+  width: 0;
+  animation: cookify-loading-progress 20s linear forwards;
+}
+
 /* ============================================
    Recipe "Expand" detail view — iOS-style animated
    reveal for the description / prep-steps section on

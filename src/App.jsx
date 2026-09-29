@@ -13,7 +13,9 @@ import Settings from './pages/Settings';
 import ERestaurant from './pages/ERestaurant';
 import StreakMilestoneModal from './components/StreakMilestoneModal';
 import PaywallModal from './components/PaywallModal';
+import LoadingScreen from './components/LoadingScreen';
 import { getUserItem, setUserItem, migrateAllLegacyKeys } from './utils/userStorage';
+import { getLoadingFacts } from './data/healthFacts';
 import React, { useState, useEffect } from 'react';
 import { initAds, setAdsEnabled } from './utils/ads';
 import { Capacitor } from '@capacitor/core';
@@ -40,9 +42,23 @@ import {
 } from 'lucide-react';
 
 export default function App() {
+  const [isStartupLoading, setIsStartupLoading] = useState(true);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [loadingFacts] = useState(() => getLoadingFacts());
+  const [loadingFactIndex, setLoadingFactIndex] = useState(0);
+
   useEffect(() => {
     //This ensures it only runs safely in the browser context
     inject();
+  }, []);
+
+  useEffect(() => {
+    const nextFactTimer = setTimeout(() => setLoadingFactIndex(1), 20_000);
+    const finishLoadingTimer = setTimeout(() => setIsStartupLoading(false), 40_000);
+    return () => {
+      clearTimeout(nextFactTimer);
+      clearTimeout(finishLoadingTimer);
+    };
   }, []);
 
   // Catches the io.cookify.app://auth-callback deep link Google sign-in
@@ -162,24 +178,30 @@ export default function App() {
   // Pick up the real Supabase session after an OAuth redirect (Google/Apple),
   // and keep it in sync if it changes.
   useEffect(() => {
+    let isMounted = true;
     supabase.auth.getSession().then(({ data }) => {
       const session = data?.session;
-      if (session?.user) {
+      if (isMounted && session?.user) {
         setAuthUser({ id: session.user.id, email: session.user.email });
         setAuthProvider(session.user.app_metadata?.provider || 'google');
         setIsAuthenticated(true);
       }
+    }).catch(() => {}).finally(() => {
+      if (isMounted) setIsAuthReady(true);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
+      if (isMounted && session?.user) {
         setAuthUser({ id: session.user.id, email: session.user.email });
         setAuthProvider(session.user.app_metadata?.provider || 'google');
         setIsAuthenticated(true);
       }
     });
 
-    return () => listener?.subscription?.unsubscribe();
+    return () => {
+      isMounted = false;
+      listener?.subscription?.unsubscribe();
+    };
   }, []);
 
   // App States
@@ -383,6 +405,10 @@ export default function App() {
       return next;
     });
   };
+
+  if (isStartupLoading || !isAuthReady) {
+    return <LoadingScreen fact={loadingFacts[loadingFactIndex]} factNumber={loadingFactIndex + 1} />;
+  }
 
   // If not logged in, show the Auth Screen
   if (!isAuthenticated) {
